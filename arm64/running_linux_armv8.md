@@ -3929,6 +3929,14 @@ void gic_enable_irq(int irq);
 
 ![image-20250831235512374](running_linux_armv8.assets/image-20250831235512374.png)
 
+
+
+没有虚拟化场景的情况下，翻译只有一个阶段，由VA映射到PA
+
+在有虚拟化场景的情况下，翻译需要先转换为IPA
+
+![image-20250912181044741](running_linux_armv8.assets/image-20250912181044741.png)
+
 ### ARMv8的页表
 
 - **aarch64仅仅支持Long Descriptor的页表格式**
@@ -3963,19 +3971,23 @@ void gic_enable_irq(int irq);
 
 #### AArch64的页表描述符
 
+下面的都是48位虚拟地址，4KB大小页面
+
 ##### L0~L2的页表描述符
 
 ![image-20250901110008780](running_linux_armv8.assets/image-20250901110008780.png)
 
 **块类型**表示描述的是一块非常大的内存
 
-
+![image-20250912180502711](running_linux_armv8.assets/image-20250912180502711.png)
 
 ##### L3页表描述符
 
 
 
 ![image-20250901122347242](running_linux_armv8.assets/image-20250901122347242.png)
+
+![image-20250912180422209](running_linux_armv8.assets/image-20250912180422209.png)
 
 ![image-20250904214429165](running_linux_armv8.assets/image-20250904214429165.png)
 
@@ -4006,7 +4018,7 @@ Armv8.6 **D5.3.3**章
   - `0` = Block entry （块映射，大页映射）
   - `1` = Table entry （指向下一级页表；到最后一级时变成 Page entry）
 
-所以：
+所以：block和page的页表属性
 
 ![image-20250901234053981](running_linux_armv8.assets/image-20250901234053981.png)
 
