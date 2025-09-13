@@ -39,6 +39,10 @@ ARM 处理器传统上有几类中断信号：
 
 ![image-20250721223108975](running_linux_armv8.assets/image-20250721223108975.png)
 
+SPSR (The Saved Program Status Register)
+
+ELR (Exception Link Register)
+
 当处理器运行在比EL0高级别的异常等级时，处理器可以访问：
 
 - 当前异常等级对应的栈指针SP_ELn
@@ -165,10 +169,6 @@ ARM 处理器传统上有几类中断信号：
 9. 内存屏障指令
 10. 异常处理指令
 11. 系统寄存器访问指令
-
-
-
-
 
 ### 加载与存储指令
 
@@ -412,8 +412,8 @@ x1-x2 = x1+ ~x2+1(发生溢出)
 
 #### 按位与操作
 
-- and 与操作
-- ands 带进位的与操作，影响Z标志位
+- **and** 与操作
+- **ands** 带进位的与操作，影响Z标志位
 
 
 
@@ -421,8 +421,8 @@ x1-x2 = x1+ ~x2+1(发生溢出)
 
 #### 按位或操作
 
-- orr 或曹祖
-- eor 异或操作
+- **orr** 或操作
+- **eor** 异或操作
 
 ![image-20250731122147408](running_linux_armv8.assets/image-20250731122147408.png)
 
@@ -430,9 +430,9 @@ x1-x2 = x1+ ~x2+1(发生溢出)
 
 #### 按位清除 
 
-- bic 位清零指令
+- **bic** 位清零指令
 
-
+不常见
 
 #### 实验3：测试ands指令以及Z标志位
 
@@ -807,6 +807,8 @@ x1+x2
 
 ![image-20250803234806379](running_linux_armv8.assets/image-20250803234806379.png)
 
+![image-20250911154435428](F:\repository\notes\arm64\running_linux_armv8.assets\image-20250911154435428.png)
+
 #### 异常处理指令
 
 | 指令         | 名称                                          | 描述                                                         |
@@ -834,6 +836,7 @@ x1+x2
 
 作用： 保证内存访问的先后顺序，但不阻塞执行。
 例子：
+
 ```asm
     str x0, [x1]     // 写数据
     dmb sy           // 确保写操作完成
@@ -853,6 +856,7 @@ x1+x2
 
 作用： 清除 CPU 指令预取缓存，通常在修改系统控制寄存器后用。
 例子：
+
 ```asm
     msr sctlr_el1, x0  // 修改系统控制寄存器
     isb                // 强制刷新指令流
@@ -906,7 +910,7 @@ x1+x2
 | 字段        | 含义说明                                                     |
 | ----------- | ------------------------------------------------------------ |
 | `NZCV`      | 条件码标志位（ALU Flags）用于条件跳转等：**N**（负号）、**Z**（零）、**C**（进位）、**V**（溢出） |
-| `Q`         | 溢出粘滞位，仅 AArch32 用某些 SIMD 操作溢出时设置            |
+| `Q`         | 溢出标志位位，仅 AArch32 用某些 SIMD 操作溢出时设置          |
 | `DAIF`      | 异常屏蔽位：**D**：调试异常屏蔽**A**：SError 屏蔽**I**：IRQ 中断屏蔽**F**：FIQ 中断屏蔽 |
 | `SPSel`     | SP 寄存器选择（仅 AArch64）控制是使用 `SP_EL0` 还是 `SP_ELx` |
 | `CurrentEL` | 当前异常级别（EL0/EL1/EL2/EL3）影响特权级访问和执行          |
@@ -1472,7 +1476,7 @@ _start:
 
 ![image-20250805162907493](running_linux_armv8.assets/image-20250805162907493.png)
 
-- 使用”\\()“表示连接（）
+-  使用”\\()“表示连接（）
 
 ![image-20250805163001419](running_linux_armv8.assets/image-20250805163001419.png)
 
@@ -1526,7 +1530,7 @@ foo .req w0
 
 - 链接器是一个程序，将一个或多个由编译器或汇编器生成的目标文件外加库链接为一个可执行文件
 - GNU Linker采用AT&T链接脚本语言
-- 官方最新文档：最新版本v2.3.4
+- 官方文档：v2.3.4
 
 ![image-20250806090712634](running_linux_armv8.assets/image-20250806090712634.png)
 
@@ -1563,9 +1567,9 @@ SECTIONS
   - loadable 运行时会加载这些段的内容到内存
   - allocatable 运行时不会加载段的内容
 - 段的地址
-  - VMA(virtual memory address) 虚拟地址，运行时的地址
-  - LMA(load memory address) 加载地址
-  - 通常ROM的地址为加载地址，而RAM的地址为VMA
+  - **VMA**(virtual memory address) 虚拟地址，运行时的地址
+  - **LMA**(load memory address) 加载地址
+  - **通常ROM的地址为加载地址，而RAM的地址为VMA**
 
 #### 链接脚本命令
 
@@ -1605,8 +1609,8 @@ SECTIONS
 
 
 - 在链接脚本中定义一个变量
-  - 链接器仅仅在符号表里定义这个符号，没有分配内存来存储变量的值
-- 访问链接脚本定义的变量：访问的时变量的地址，不能访问变量的值
+  - **链接器仅仅在符号表里定义这个符号，没有分配内存来存储变量的值**
+- 访问链接脚本定义的变量：**访问的时变量的地址，不能访问变量的值**
 
 ![image-20250806144340025](running_linux_armv8.assets/image-20250806144340025.png)
 
@@ -1640,10 +1644,10 @@ SECTIONS
 
 #### LMA加载地址
 
-- 每个段都有VMA（虚拟地址，运行地址）以及LMA（加载地址）
-- 在输出段描述符中使用"AT"来指定LMA
-- 如果没有通过"AT"来指定LMA，通常LMA=VMA
-- 构建一个基于ROM的映像文件常常会设置输出段的虚拟地址和加载地址不一致
+- 每个段都有**VMA**（虚拟地址，运行地址）以及**LMA**（加载地址）
+- 在输出段描述符中**使用"AT"来指定LMA**
+- **如果没有通过"AT"来指定LMA，通常LMA=VMA**
+- 构建**一个基于ROM的映像文件常常会设置输出段的虚拟地址和加载地址不一致**
 
 ![image-20250806154638115](running_linux_armv8.assets/image-20250806154638115.png)
 
@@ -1708,6 +1712,8 @@ _text = .;
 
 定义的不是变量本身，而是一个 地址标签（symbol address）。在 C 中没有对应“地址标签”的语法，因此只能通过某种“变量”来间接引用这个地址。
 
+
+
 用 char[] 声明它，其实是在说：
 
 > “这是一段起始于 _text 的内存区域，我关心的是它的地址，而不是它的具体内容。”
@@ -1725,7 +1731,7 @@ size_t text_size = _etext - _text;  // 计算段长度（字节）
 
 如果你写成 int[] 或 void*，这个计算就可能出错，或者无法编译。
 
-3. char[] vs char* 的差异：链接器符号是“数组地址”而非指针变量
+3. char[] vs char* 的差异：**链接器符号是“数组地址”而非指针变量**
 
 虽然你也可以写成：
 ```c
@@ -1848,7 +1854,7 @@ extern char _text[];
 
   - GCC编译器把内嵌汇编当成一个字符串
 
-  - GCC编译器不回去解析和分析内嵌汇编
+  - GCC编译不会去解析和分析内嵌汇编
 
   - 多条汇编指令，需要使用”\n\t“来换行
 
@@ -1941,8 +1947,8 @@ extern char _text[];
 
 ### 陷阱与坑
 
-- GDB不能单步调试内嵌汇编
-- 输出部和输入部的修饰符不能用错，否则程序会跑错
+- **GDB不能单步调试内嵌汇编**
+- **输出部和输入部的修饰符不能用错**，否则程序会跑错
 
 ### 实验3：使用内嵌汇编来完善memset函数
 
@@ -2195,8 +2201,6 @@ ARMv8.6手册
 
 > 硬件把 ELR 设置为 *svc 的下一条指令*，所以 `eret` 会直接返回到下一条
 
-
-
 ### 异常处理的路由
 
 > 当在一个特定的“异常等级（Exception Level, EL）”发生异常时，CPU 应该跳转到哪个异常等级去处理它
@@ -2204,7 +2208,7 @@ ARMv8.6手册
 - 异常发生时，可以在**当前EL处理也可以在更高EL处理**
 - **EL0不能用来处理异常**
 - **同步异常是可以在当前EL里处理的**，比如在EL1发生了同步异常
-- 对于**异步异常，可以路由到EL1,EL2,EL3处理**，需要配置**HCR**以及**SCR**相关寄存器
+- 对于**异步异常，可以路由到EL1,EL2,EL3处理**，需要配置**HCR**（Hypervisor Configuration Register）以及**SCR**（Secure Configuration Register）相关寄存器
 
 ![image-20250809151216712](running_linux_armv8.assets/image-20250809151216712.png)
 
@@ -2290,9 +2294,9 @@ ARMv8.6手册
 
    ![image-20250811141457010](running_linux_armv8.assets/image-20250811141457010.png)
 
-   ![image-20250811141708232](running_linux_armv8.assets/image-20250811141708232.png)
-
    ![image-20250811220228831](running_linux_armv8.assets/image-20250811220228831.png)
+
+   ![image-20250811141708232](running_linux_armv8.assets/image-20250811141708232.png)
 
    
 
@@ -2346,8 +2350,6 @@ ARMv8.6手册
 
   0~10是reserve，因此**地址是2k对齐**
 
-- **每个表项可以用于存放32条指令，一共128个字节**
-
 ![image-20250812230023129](running_linux_armv8.assets/image-20250812230023129.png)
 
 1. 行（Exception taken from）
@@ -2371,6 +2373,41 @@ ARMv8.6手册
 3. **偏移值（如 0x000、0x080 等）**：基于行（触发状态）和列（异常类型）的组合，给出相对于向量表基地址的偏移，处理器通过基地址 + 偏移，就能找到异常处理程序的入口地址 。
 
 ![image-20250812231704273](running_linux_armv8.assets/image-20250812231704273.png)
+
+
+
+- **异常向量表的整体结构**
+
+在 **AArch64 EL1** 及以上的执行级别中，异常向量表（Vector Table）存放在 **`VBAR_ELx`**（Vector Base Address Register）寄存器指向的地址。
+
+这个表里一共包含 **4 个“区块” (blocks)**，分别对应不同的异常来源：
+
+1. **从当前的 SP (SP0)** 触发的异常
+2. **从当前的 SP (SPx)** 触发的异常（x≠0，比如 SP_EL1）
+3. **来自下一个更低特权级（比如 EL0）** 的异常
+4. **来自当前特权级（比如 EL1 内部）** 的异常
+
+每个区块又包含 **4 种异常类型**：
+
+- **Synchronous exception** （同步异常，比如 SVC 指令、数据访问异常）
+- **IRQ** （普通中断）
+- **FIQ** （快速中断）
+- **SError** （系统错误，通常是硬件异常）
+
+所以总共：
+  **4 个区块 × 4 种异常 = 16 个表项**
+
+------
+
+**每个表项的大小**
+
+ARMv8-A 规定：
+
+- **每个表项的大小固定为 128 字节**（0x80）。
+- **16 个表项 × 128 字节 = 2048 字节 = 2KB**。
+- 所以整个向量表的大小是 **2KB**。
+
+也就是说，异常向量表必须是 **2KB 对齐**的区域。
 
 ### Linux5.0内核的异常处理
 
@@ -2419,7 +2456,7 @@ ARMv8.6手册
 
 ![image-20250813225551639](running_linux_armv8.assets/image-20250813225551639.png)
 
- **Fault Address Register (at EL1)**
+**FAR        Fault Address Register (at EL1)**
 
 它的作用是：
 
@@ -2586,7 +2623,7 @@ x6 = *(PC-relative 地址 + MY_LABEL)
 
 ### 同步异常的解析
 
-#### ESR_ELx(异常综合信息寄存器)
+#### ESR_ELx(异常综合信息寄存器 Excepion Syndrome Register)
 
 ![image-20250825164711378](running_linux_armv8.assets/image-20250825164711378.png)
 
@@ -2748,13 +2785,13 @@ FAR寄存器保**存了发生异常时刻的虚拟地址**
 
 **结构**：
 
-- 高 6 位 → EC（Exception Class）
+- 高 6 位 → **EC（Exception Class）**
 - IL、ISV → 指令长度/有效性
-- ISS → Instruction Specific Syndrome
+- **ISS → Instruction Specific Syndrome**
 - FSC → 数据访问异常代码
 - WNR、EA、CM → 访问属性
 
-kernel.c
+**kernel.c**
 
 ```c
 static const char *const bad_mode_handler[] = {"Sync Abort", "IRQ", "FIQ",
@@ -2918,8 +2955,8 @@ Technical Reference Manual](running_linux_armv8.assets/image-20250825185705111.p
 
 - **ARM Core n**	(ARM核心的中断源)
 
-  - **PS timer IRQ**对应 **A Non-secure EL1 physical timer**
-  - **PNS timer IRQ**对应**A secure EL1 physical timer**
+  - **PNS timer IRQ**对应 **A Non-secure EL1 physical timer**
+  - **PS timer IRQ**对应**A secure EL1 physical timer**
   - **HP timer IRQ**(Hypervisor)对应**A Non-secure EL2 physical timer**
   - **V timer IRQ** 对应 **A virtual timer**
   - **PMU** 是**Performance Monitor Unit（性能监控单元）**
@@ -2959,7 +2996,7 @@ ARMC和VC通过ARMC routing 硬件单元路由
 
 #### **Legacy IRQ status registers**
 
-![image-20250825225938975](running_linux_armv8.assets/image-20250825225938975.png)
+<img src="running_linux_armv8.assets/image-20250825225938975.png" alt="image-20250825225938975" style="zoom:150%;" />
 
 - FIQn/IRQn_PENDING2
 
@@ -3279,7 +3316,7 @@ void kernel_main(void) {
 
 ![image-20250828162932926](running_linux_armv8.assets/image-20250828162932926.png)
 
-关键在于使用函数方式lr寄存器被破坏
+关键在于**使用函数方式lr寄存器被破坏**
 
 ![image-20250828163516633](running_linux_armv8.assets/image-20250828163516633.png)
 
@@ -3384,6 +3421,7 @@ void kernel_main(void) {
 **GICD_ITARGETSRn** (**Interrupt Processor Targets Registers**)
 
 ![image-20250829104753310](running_linux_armv8.assets/image-20250829104753310.png)
+> GICD_ITARGETSRn寄存器**用来配置Distributor可以把中断路由到哪个CPU上**，是一个 32 位寄存器，通常每**个中断有一个对应的寄存器**。
 
 - **8bit来表示一个中断源，共四个中断源，每个bit代表能路由的CPU**
 -  **byte-accessible**
@@ -3391,7 +3429,7 @@ void kernel_main(void) {
 - **前32个中断源的路由配置是硬件设置好的，RO**
 - 第33~1019号中断，可以由软件来配置其路由，RW
 
-> GICD_ITARGETSRn寄存器**用来配置Distributor可以把中断路由到哪个CPU上**，是一个 32 位寄存器，通常每**个中断有一个对应的寄存器**。
+
 
 对应**计算方法**：
 
@@ -3467,7 +3505,9 @@ A register bit corresponding to an unimplemented interrupt is RAZ/WI.
 
 > **Interrupt Processor Targets Registers**，见中断路由章节
 
-##### GICD_TYPER
+##### GICD_TYPER （Interrupt Controller Type Register）
+
+> **描述这个 GIC 的能力和配置参数**，比如有多少中断、多少个 CPU 接口、是否支持某些特性等等。
 
 ![image-20250830173053302](running_linux_armv8.assets/image-20250830173053302.png)
 
@@ -3505,22 +3545,6 @@ GIC用来配置**中断触发类型**的寄存器
 | ------ | -------- | ------------------- |
 | 0      | reversed | **Level-sensitive** |
 | 1      | reserved | **Edge-triggered**  |
-
-常用 **active low**
-
-> 在实际硬件设计里，几乎所有 **外设中断线**（SPI）都是 **低电平有效 (active low)** 的。
-> 原因有几个：
->
-> 1. **抗干扰性强**
->     默认线路上是高电平，噪声更容易被识别为“假的高电平”；而如果是低电平有效，只有当外设真正把线拉低，才会被识别为中断。
-> 2. **多路外设可以用线或 (wired-OR)**
->     多个设备的中断信号可以接到同一根线上（open-drain + 上拉电阻），只要有一个拉低，CPU 就能收到中断，这种方式只能在 **active low** 下实现。
-> 3. **和电源/复位电路兼容**
->     Active low 在硬件上更容易设计，避免和电源上电时的“毛刺”冲突。
-
-
-
-因此，大多数 SoC、板级设计里，**SPI 中断线默认是 active low**。
 
 ##### GICD_ISENABLERn
 
@@ -3758,7 +3782,7 @@ GIC用来配置**中断触发类型**的寄存器
 
 **GIC-400初始化**
 
-1. 设置distributor和CPU interface寄存器组的基地址
+1. 设置**distributor**和**CPU interface**寄存器组的基地址
 
 ```c
 #ifndef __GIC_V2_H
@@ -3805,11 +3829,11 @@ void gic_enable_irq(int irq);
 
 ```
 
-2. 读取GICD_TYPER寄存器，计算当前GIC最大支持多少个中断源
+2. 读取**GICD_TYPER**寄存器，计算当前GIC最大支持多少个中断源
 
 ![image-20250831220730571](running_linux_armv8.assets/image-20250831220730571.png)
 
-3. 初始化distributor
+3. 初始化**distributor**
 
    ![image-20250831221034830](running_linux_armv8.assets/image-20250831221034830.png)
 
@@ -3907,12 +3931,12 @@ void gic_enable_irq(int irq);
 
 ### ARMv8的页表
 
-- aarch64仅仅支持Long Descriptor的页表格式
+- **aarch64仅仅支持Long Descriptor的页表格式**
 
 - AArch32支持两种页表格式
 
   - Armv7-A Short Descriptor format
-  - Armv7-A (LPAE) Long Descriptor format
+  - Armv7-A (**LPAE**) Long Descriptor format
 
 - AArch64支持三种不同的页大小：4KB，16KB，64KB
 
@@ -3926,12 +3950,12 @@ void gic_enable_irq(int irq);
 
   - **虚拟地址VA被划分为两个空间**，**每个空间最大支持256TB**
 
-    - 低位虚拟地址空间位于0x0000_0000_0000_0000到0x0000_FFFF_FFFF_FFFF
-    - 高位的虚拟地址空间位于0xFFFF_0000_0000_0000到0xFFFF_FFFF_FFFF_FFFF
+    - **低位虚拟地址空间位于0x0000_0000_0000_0000到0x0000_FFFF_FFFF_FFFF**
+    - **高位的虚拟地址空间位于0xFFFF_0000_0000_0000到0xFFFF_FFFF_FFFF_FFFF**
 
     ![image-20250901095610466](running_linux_armv8.assets/image-20250901095610466.png)
 
-    （Fault是非规范区域，CPU不能访问）
+    （**Fault是非规范区域，CPU不能访问**）
 
     **四级页表**
 
@@ -3943,7 +3967,7 @@ void gic_enable_irq(int irq);
 
 ![image-20250901110008780](running_linux_armv8.assets/image-20250901110008780.png)
 
-块类型表示：描述的是一块非常大的内存
+**块类型**表示描述的是一块非常大的内存
 
 
 
@@ -3959,12 +3983,12 @@ void gic_enable_irq(int irq);
 
 ![image-20250904214646426](running_linux_armv8.assets/image-20250904214646426.png)
 
-| 层级 (Level) | 对应 Linux 抽象 | 描述符可能的类型                        |
-| ------------ | --------------- | --------------------------------------- |
-| L0 (可选)    | PGD             | Table / Fault                           |
-| L1           | PUD             | Block (1GB, granule=4K) / Table / Fault |
-| L2           | PMD             | Block (2MB, granule=4K) / Table / Fault |
-| L3           | PTE             | Page (4KB, granule=4K) / Fault          |
+| 层级 (Level) | 对应 Linux 抽象 | 描述符可能的类型                            |
+| ------------ | --------------- | ------------------------------------------- |
+| L0 (可选)    | **PGD**         | **Table / Fault**                           |
+| L1           | **PUD**         | **Block (1GB, granule=4K) / Table / Fault** |
+| L2           | **PMD**         | **Block (2MB, granule=4K) / Table / Fault** |
+| L3           | **PTE**         | **Page (4KB, granule=4K) / Fault**          |
 
 > 注意：
 >
@@ -4000,12 +4024,12 @@ Armv8.6 **D5.3.3**章
 
 - ARMv8**利用TLB进行的一个优化**：利用**一个TLB entry来完成多个连续的page的VA到PA的转换**
 - **使用Contiguous bit的条件**
-  - 页面对应的VA必须是连续的
-  - 对于4KB的页面，16个连续的page
-  - 对于16KB的页面，32或128个连续的page
-  - 对于64KB的页面，32个连续的page
-  - 连续的页面必须有相同的属性
-  - 起始地址必须以页面对齐
+  - **页面对应的VA必须是连续的**
+  - **对于4KB的页面，16个连续的page**
+  - **对于16KB的页面，32或128个连续的page**
+  - **对于64KB的页面，32个连续的page**
+  - **连续的页面必须有相同的属性**
+  - **起始地址必须以页面对齐**
 
 
 
@@ -4062,10 +4086,10 @@ Armv8.6 **D5.3.3**章
 
 ![image-20250902011102577](running_linux_armv8.assets/image-20250902011102577.png)
 
-- IPS：Intermediate Physical Address Size，用来配置物理地址大小，例如48bit，256TB大小的物理空间
-- TG1和TG0：配置页表粒度的大小，例如4KB，16KB，64KB
-- T1SZ：用来配置TTBR_EL1页表能管辖的大小，计算公式为2^(64-T1SZ)个字节
-- T0SZ：用来配置TTBR_EL0页表能管辖的大小，计算公式为2^(64-T0SZ)个字节
+- **IPS**：Intermediate Physical Address Size，用来配置物理地址大小，例如48bit，256TB大小的物理空间
+- **TG1**和**TG0**：配置页表粒度的大小，例如4KB，16KB，64KB
+- **T1SZ**：用来配置TTBR_EL1页表能管辖的大小，计算公式为2^(64-T1SZ)个字节
+- **T0SZ**：用来配置TTBR_EL0页表能管辖的大小，计算公式为2^(64-T0SZ)个字节
 
 > 在 ARM64 中，虚拟地址的高位并不是随便用的，而是受 **TCR_EL1.T0SZ / T1SZ** 限制。
 
@@ -4073,10 +4097,10 @@ Armv8.6 **D5.3.3**章
 
 ![image-20250902012554941](running_linux_armv8.assets/image-20250902012554941.png)
 
-- SH1：设置内存相关的cache属性，这些内存是通过TTBR_EL1页表来访问的。例如Non-shareable, Outer Shareable，Inner Shareable
-- ORGN1：设置Outer Shareable的相关属性
-- IRGN1：设置Innter Shareable 的相关属性
-- SH0：设置内存相关的cache属性，这些内存是通过TTBR_EL0页表来访问的
+- **SH1**：设置内存相关的cache属性，这些内存是通过TTBR_EL1页表来访问的。例如Non-shareable, Outer Shareable，Inner Shareable
+- **ORGN1**：设置Outer Shareable的相关属性
+- **IRGN1**：设置Innter Shareable 的相关属性
+- **SH0**：设置内存相关的cache属性，这些内存是通过TTBR_EL0页表来访问的
 
 ##### SCTLR_EL1
 
@@ -4114,10 +4138,10 @@ Armv8.6 **D5.3.3**章
 
     > 处理器访问设备内存会有很多限制，比如不能进行预测访问等。设备内存是严格按照指令顺序来执行的。ARMv8架构定义了多种设备内存的属性
 
-    - Device-nGnRnE   (不支持聚合操作，不支持指令重排，不支持提前写应答)
-    - Device-nGnRE     (不支持聚合操作，不支持指令重排，支持提前写应答)
-    - Device-nGRE        (不支持聚合操作，支持指令重排，支持提前写应答)
-    - Device-GRE           (支持聚合操作，支持指令重排，支持提前写应答)
+    - **Device-nGnRnE**   (不支持聚合操作，不支持指令重排，不支持提前写应答)
+    - **Device-nGnRE**     (不支持聚合操作，不支持指令重排，支持提前写应答)
+    - **Device-nGRE**        (不支持聚合操作，支持指令重排，支持提前写应答)
+    - **Device-GRE**           (支持聚合操作，支持指令重排，支持提前写应答)
 
 **Linux内核中定义**
 
