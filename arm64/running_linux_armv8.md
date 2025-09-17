@@ -4049,7 +4049,9 @@ Armv8.6 **D5.3.3**章
 
 - 4级页表
 - 48bit虚拟地址
-- 每级页表使用9bit来做索引(512 entries)
+- **每级页表使用9bit来做索引(512 entries)**
+
+
 
 ![image-20250902001655479](running_linux_armv8.assets/image-20250902001655479.png)
 
