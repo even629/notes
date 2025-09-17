@@ -4004,8 +4004,9 @@ void gic_enable_irq(int irq);
 
 > 注意：
 >
-> - **Block entry** 只能出现在中间层（L1/L2），表示大页映射。
+> - **Block entry** 只能出现在中间层（L1/L2），表示大页映射，映射一大段物理地址空间，相当于最后一级页表了。
 > - **PTE (L3)** 不能是 Block，只能是 Page 或 Fault。
+> - 输出地址是下一级页表的**PA**即物理地址
 
 #### 页表属性
 
@@ -4023,6 +4024,8 @@ Armv8.6 **D5.3.3**章
 ![image-20250901234053981](running_linux_armv8.assets/image-20250901234053981.png)
 
 **高位属性和低位属性**
+
+只描述**Block**和**Page**
 
 ![image-20250904022421615](running_linux_armv8.assets/image-20250904022421615.png)
 
@@ -4241,4 +4244,6 @@ arch/arm64/mm/mmu.c
 ![image-20250903200428924](running_linux_armv8.assets/image-20250903200428924.png)
 
 
+
+### MMU芯片手册阅读
 
