@@ -4010,6 +4010,8 @@ void gic_enable_irq(int irq);
 
 #### 页表属性
 
+> 只有指向 **最终物理页（block/page）** 的表项，才需要页表属性
+
 Armv8.6 **D5.3.3**章
 
 - **bit[0]** → 是否有效：
@@ -4141,6 +4143,113 @@ Armv8.6 **D5.3.3**章
 
 ![image-20250902013328537](running_linux_armv8.assets/image-20250902013328537.png)
 
+##### MAIR_EL1
+
+> Memory Attribute Indirection Register
+
+![image-20250919153741608](running_linux_armv8.assets/image-20250919153741608.png)
+
+![image-20250919153824935](running_linux_armv8.assets/image-20250919153824935.png)
+
+![image-20250919153907126](running_linux_armv8.assets/image-20250919153907126.png)
+
+![image-20250919153920520](running_linux_armv8.assets/image-20250919153920520.png)
+
+
+
+![image-20250919154058311](running_linux_armv8.assets/image-20250919154058311.png)
+
+![image-20250919154116988](running_linux_armv8.assets/image-20250919154116988.png)
+
+![image-20250919154133551](running_linux_armv8.assets/image-20250919154133551.png)
+
+
+
+##### ID_AA64MMFR0_EL1
+
+> AArch64 Memory Model Feature Register 0，报告处理器对 **页表、地址范围和内存特性的支持情况**
+
+![image-20250919163924002](running_linux_armv8.assets/image-20250919163924002.png)
+
+
+
+![image-20250919163948258](running_linux_armv8.assets/image-20250919163948258.png)
+
+| 字段      | 位      | 含义                                |
+| --------- | ------- | ----------------------------------- |
+| PARANGE   | [3:0]   | 支持的物理地址位宽                  |
+| ASID      | [7:4]   | 支持的 ASID（Address Space ID）位数 |
+| BIGENDEL  | [11:8]  | 支持 EL1/EL0 大页扩展               |
+| SNSMEM    | [15:12] | 是否支持安全内存访问                |
+| BIGENDEL0 | [19:16] | 支持 EL0 大页扩展                   |
+| TGRAN16   | [23:20] | 支持 16KB 页                        |
+| TGRAN64   | [27:24] | 支持 64KB 页                        |
+| TGRAN4    | [31:28] | 支持 4KB 页                         |
+
+
+
+##### CPACR_EL1
+
+> Architectural Feature Access Control Register
+
+![image-20250919152141812](running_linux_armv8.assets\image-20250919152141812.png)
+
+![image-20250919152257188](running_linux_armv8.assets/image-20250919152257188.png)
+
+**FPEN 字段（CPACR_EL1[21:20]）**
+
+>  FPEN = Floating-point Enable controls，控制 **EL0/EL1 对 SVE、Advanced SIMD、浮点寄存器的访问是否被 EL1/EL2 捕获（trapped）**。
+
+- **寄存器影响**：
+  - **AArch64**:
+    - FPCR、FPSR
+    - SIMD/Floating-point 寄存器 `V0-V31`（含 D0-D31 / S0-S31 视图）
+  - **AArch32 / Advanced SIMD**:
+    - FPSCR
+    - Q0-Q15（含 D0-D31 / S0-S31 视图）
+- **异常报告**：
+  - EL0/EL1 捕获 → EC syndrome = `0x07`
+  - EL2 捕获 → EC syndrome = `0x00`（当 EL2 启用且 `HCR_EL2.TGE = 1`）
+
+| FPEN | 行为描述                                                     |
+| ---- | ------------------------------------------------------------ |
+| 0b00 | **EL0 和 EL1 的指令都会被捕获**，除非 CPACR_EL1.ZEN 已经捕获它们 |
+| 0b01 | **仅 EL0 的指令会被捕获**，EL1 不捕获                        |
+| 0b10 | **EL0 和 EL1 的指令都会被捕获**（与 0b00 相同）              |
+| 0b11 | **不捕获任何指令**（寄存器可自由访问）                       |
+
+**简单来说**：
+
+- FPEN 控制了 **用户态 (EL0) 或内核态 (EL1) 是否可以直接使用浮点/SIMD/SVE 寄存器**。**开启MMU前通常要打开**
+
+- 配合 CPACR_EL1.ZEN，可以对不同级别的访问做精细控制。
+
+- 常用配置：
+
+  - **0b11** → 不捕获，允许所有 EL0/EL1 指令访问 FP/SIMD。
+
+  - **0b00/0b10** → 捕获，通常用于安全或虚拟化场景。
+
+![image-20250919152424128](running_linux_armv8.assets/image-20250919152424128.png)
+
+##### MDSCR_EL1
+
+![image-20250919153102235](running_linux_armv8.assets/image-20250919153102235.png)
+
+![image-20250919153306784](running_linux_armv8.assets/image-20250919153306784.png)
+
+**TDCC**
+
+- **TDCC = 0** → 用户态 EL0 可以直接读写 DCC 寄存器。
+
+- **TDCC = 1** → EL0 访问 DCC 寄存器会被 trap 到 EL1/EL2，常用于 **安全/虚拟化/调试控制**。
+
+
+
+> DCC 是 **调试通信通道（Debug Communication Channel）**，它提供了 **CPU 与调试器（Debug Host）之间的数据传输接口**，打开后才能使用Jtag
+
+![image-20250919153337564](running_linux_armv8.assets/image-20250919153337564.png)
+
 ### 内存属性
 
 #### ARMv8定义的内存属性
@@ -4232,7 +4341,35 @@ arch/arm64/mm/mmu.c
 
 
 
+![image-20250920200447372](running_linux_armv8.assets/image-20250920200447372.png)
 
+![image-20250920200359611](running_linux_armv8.assets/image-20250920200359611.png)
+
+
+
+![image-20250920195827243](running_linux_armv8.assets/image-20250920195827243.png)
+
+![image-20250920200006833](running_linux_armv8.assets/image-20250920200006833.png)
+
+![image-20250920200053467](running_linux_armv8.assets/image-20250920200053467.png)
+
+![image-20250920200225287](running_linux_armv8.assets/image-20250920200225287.png)
+
+![image-20250920200204862](running_linux_armv8.assets/image-20250920200204862.png)
+
+![image-20250920200137344](running_linux_armv8.assets/image-20250920200137344.png)
+
+![image-20250920200310102](running_linux_armv8.assets/image-20250920200310102.png)
+
+![image-20250920200246974](running_linux_armv8.assets/image-20250920200246974.png)
+
+![image-20250920200334498](running_linux_armv8.assets/image-20250920200334498.png)
+
+
+
+![image-20250920195849461](running_linux_armv8.assets/image-20250920195849461.png)
+
+![image-20250920195936345](running_linux_armv8.assets/image-20250920195936345.png)
 
 **为什么要恒等映射**
 
@@ -4245,7 +4382,15 @@ arch/arm64/mm/mmu.c
 
 ![image-20250903200428924](running_linux_armv8.assets/image-20250903200428924.png)
 
+很明显，_text_boot到\_etext的内存属性应该映射成PAGE_KERNEL_ROX
 
+从_etext到TOTAL_MEMORY才是映射成PAGE_KERNEL
+
+
+
+### 实验三：实现一个MMU页表dump的功能
+
+![image-20250920201518274](running_linux_armv8.assets/image-20250920201518274.png)
 
 ### MMU芯片手册阅读
 
