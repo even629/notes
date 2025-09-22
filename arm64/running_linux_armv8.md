@@ -3910,6 +3910,8 @@ void gic_enable_irq(int irq);
 - **每个进程拥有一套属于自己的页表，在进程切换时需要切换页表基地址。**如上述的一级页表，每个进程需要为其分配4MB的连续物理内存来存储页表，这是不能接受的，因为这样太浪费内存了。
 - 多级页表：按需一级一级映射，不用一次全部映射所有地址空间
 
+
+
 #### 二级页表
 
 ![image-20250831235240724](running_linux_armv8.assets/image-20250831235240724.png)
@@ -3936,6 +3938,14 @@ void gic_enable_irq(int irq);
 在有虚拟化场景的情况下，翻译需要先转换为IPA
 
 ![image-20250912181044741](running_linux_armv8.assets/image-20250912181044741.png)
+
+
+
+**TTBR0_ELx** 用于每个进程的地址空间
+
+**TTBR1_ELx **用于内核空间，所有进程共享
+
+![image-20250921185018516](running_linux_armv8.assets/image-20250921185018516.png)
 
 ### ARMv8的页表
 
@@ -4117,9 +4127,20 @@ Armv8.6 **D5.3.3**章
 ![image-20250902012554941](running_linux_armv8.assets/image-20250902012554941.png)
 
 - **SH1**：设置内存相关的cache属性，这些内存是通过TTBR_EL1页表来访问的。例如Non-shareable, Outer Shareable，Inner Shareable
-- **ORGN1**：设置Outer Shareable的相关属性
-- **IRGN1**：设置Innter Shareable 的相关属性
 - **SH0**：设置内存相关的cache属性，这些内存是通过TTBR_EL0页表来访问的
+
+![image-20250921173931770](running_linux_armv8.assets/image-20250921173931770.png)
+
+![image-20250921174050978](running_linux_armv8.assets/image-20250921174050978.png)
+
+- **ORGN1**：设置Outer Shareable的相关属性
+- **ORGN0**:  设置Outer Shareable的相关属性
+- **IRGN1**： 设置Inner Shareable 的相关属性
+- **IRGN0**： 设置Inner Shareable 的相关属性
+
+![image-20250921173907036](running_linux_armv8.assets/image-20250921173907036.png)
+
+
 
 ##### SCTLR_EL1
 
@@ -4392,5 +4413,249 @@ arch/arm64/mm/mmu.c
 
 ![image-20250920201518274](running_linux_armv8.assets/image-20250920201518274.png)
 
+### 实验四：修改页面属性导致的系统宕机
+
+![image-20250921164535873](running_linux_armv8.assets/image-20250921164535873.png)
+
+小明同学做了这个实验，他在链接脚本里text段申请了一个4KB的只读页面，然后实现了一个walk_pgtable()的函数去遍历页表和查找对应的PTE，发现怎么设置都没法让页面设置为可写
+
+![image-20250921164645740](running_linux_armv8.assets/image-20250921164645740.png)
+
+
+
+
+
+![image-20250921165259831](running_linux_armv8.assets/image-20250921165259831.png)
+
+![image-20250921165333901](running_linux_armv8.assets/image-20250921165333901.png)
+
+问题出在这里
+
+​	![image-20250921165417892](running_linux_armv8.assets/image-20250921165417892.png)
+
+应改成
+
+![image-20250921165555291](running_linux_armv8.assets/image-20250921165555291.png)
+
+### 实验五：验证ldxr和stxr指令
+
+![image-20250921170210342](running_linux_armv8.assets/image-20250921170210342.png)
+
+
+
+![image-20250921170511374](running_linux_armv8.assets/image-20250921170511374.png)
+
+
+
+原因是我们没有设置sharable属性
+
+![image-20250921170554115](running_linux_armv8.assets/image-20250921170554115.png)
+
+
+
+![image-20250921174407321](running_linux_armv8.assets/image-20250921174407321.png)
+
+![image-20250921174420561](running_linux_armv8.assets/image-20250921174420561.png)
+
+### 实验六：地址转换AT指令
+
+![image-20250921181449858](running_linux_armv8.assets/image-20250921181449858.png)
+
+
+
+![image-20250921181554709](running_linux_armv8.assets/image-20250921181554709.png)
+
+![image-20250921181609567](running_linux_armv8.assets/image-20250921181609567.png)
+
 ### MMU芯片手册阅读
 
+## Cache基础知识
+
+芯片手册：
+
+![image-20250921194203407](running_linux_armv8.assets/image-20250921194203407.png)
+
+经典的cache架构：
+
+![image-20250921194233140](running_linux_armv8.assets/image-20250921194233140.png)
+
+### Cache内部架构图
+
+![image-20250921194635709](running_linux_armv8.assets/image-20250921194635709.png)
+
+- **高速缓存行**：高速缓存中的最小的访问单元
+- **索引(index)域**: 用于索引和查找是在高速缓存中的哪一行
+- **标记(tag)**：高速缓存地址编码的一部分，通常是高速缓存地址的高位部分，用来判断高速缓存行缓存的数据地址是否和处理器寻址地址一致
+- **偏移(offset) **: 高速缓存行中的偏移。处理器可以按字(word)或者字节(Byte)来寻址高速缓存行的内容
+- **组(set)**：相同索引域的高速缓存行组成一个组
+- **路(way)**: 在组相联的高速缓存中，高速缓存被分成大小相同的几个块
+
+组的作用主要是防止cache的"颠簸"
+
+![image-20250921195738818](running_linux_armv8.assets/image-20250921195738818.png)
+
+### Cache映射方式
+
+#### 直接映射
+
+> 每个组只有一行高速缓存行时，称为直接映射高速缓存(direct-mapping)
+
+![image-20250922151547275](running_linux_armv8.assets/image-20250922151547275.png)
+
+例子：
+
+![image-20250922151745544](running_linux_armv8.assets/image-20250922151745544.png)
+
+0x00,0x40,0x80都映射了同一个高速缓存行里，会频繁发生高速缓存替换性能较低
+
+#### 全关联
+
+> 当cache只有一个组，即主存中只有一个地址与n个cache line对应，成为全相联
+
+![image-20250922152226573](running_linux_armv8.assets/image-20250922152226573.png)
+
+#### 组相联
+
+- 一个二路相联的高速缓存为例，每一路包括4个高速缓存行，那么每两个组有两个高速缓存行可以提供高速缓存行的替换
+- 减小高速缓存的颠簸
+
+![image-20250922152539265](running_linux_armv8.assets/image-20250922152539265.png)
+
+举例：
+
+- 高速缓存的总大小是32KB，并且是4路(way)，所以每一路的大小为8KB：way_size = 32/4 = 8(KB)
+- 高速缓存行的大小为32字节，所以每一路包含的高速缓存行数量为：num_cache_line = 8KB/32B=256
+
+由此可以画出高速缓存的结构图：
+![image-20250922153052251](running_linux_armv8.assets/image-20250922153052251.png)
+
+索引值为12-5+1 = 8位，共2^8=256，可以索引256个cache line
+
+
+
+### 物理高速缓存
+
+> 当处理器查询MMU和TLB得到物理地址之后，使用物理地址去查询高速缓存
+
+**缺点**：处理器在查询MMU和TLB后才能访问高速缓存，增加了流水线的延迟
+
+![image-20250922153248763](running_linux_armv8.assets/image-20250922153248763.png)
+
+### 虚拟高速缓存
+
+> 处理器使用虚拟地址来寻址高速缓存
+
+**缺点**：会引入不少问题：
+
+- 重名(Aliasing)问题
+- 同名(Homonyms)问题
+
+
+
+![image-20250922153646668](running_linux_armv8.assets/image-20250922153646668.png)
+
+#### 重名问题(Aliasing)
+
+- 在操作系统中，多个不同的虚拟地址可能映射相同的物理地址。由于采用虚拟高速缓存架构，那么这些不同的虚拟地址会占用高速缓存中不同的高速缓存行，但是它们对应的是相同的物理地址
+- 举个例子：VA1和VA2都映射到PA，在cache中有两个cache line缓存了VA1和VA2
+  - 当程序往VA1写入数据时，VA1对应的高速缓存行以及PA的内容会被更改，但是VA2还保存着旧数据。这样一个物理地址在虚拟高速缓存中就保存了两份数据，这样会产生歧义
+
+![image-20250922155306709](running_linux_armv8.assets/image-20250922155306709.png)	
+
+#### 同名问题(Homonyms)
+
+- 相同的虚拟地址对应着不同的物理地址，因为操作系统中不同的进程会存在很多相同的虚拟地址，而这些相同的虚拟地址在经过MMU转换后得到不同的物理地址，这就产生了同名问题
+- 同名问题最常见的地方是进程切换。当一个进程切换到另外一个进程时，新进程使用虚拟地址来访问高速缓存的话，新进程会访问到旧进程遗留下来的高速缓存，这些高速缓存数据对于新进程来说是错误和没用的。解决办法是在进程切换时把旧进程遗留下来的高速缓存都置为无效，这样就能保证新进程执行时得到一个干净的虚拟高速缓存。
+
+### 高速缓存分类
+
+- **VIVT** (Virtual Index Virtual Tag):  使用虚拟地址的索引域和虚拟地址的标记域，相当于是虚拟高速缓存
+- **PIPT** (Physical Index Physical Tag): 使用物理地址索引域和物理地址标记域，相当于是物理高速缓存
+- **VIPT** (Virtual Index Physical Tag): 使用虚拟地址索引域和物理地址的标记域
+
+#### VIPT工作过程
+
+![image-20250922160506763](running_linux_armv8.assets/image-20250922160506763.png)
+
+
+
+左右两步同时进行
+
+#### VIPT别名问题
+
+两个虚拟页面同时映射到同一个物理页面时，两个虚拟页面同时一起填满了Cache的一路
+
+![image-20250922160903254](running_linux_armv8.assets/image-20250922160903254.png)
+
+如图，Virtual Page1改写后，Virtual Page2访问的仍然是原来的数据
+
+![image-20250922161212502](running_linux_armv8.assets/image-20250922161212502.png)
+
+
+
+这个别名问题可以通过cache layout 来避免
+
+
+
+### Cache层级
+
+**两级cache**的系统
+
+![image-20250922161320308](running_linux_armv8.assets/image-20250922161320308.png)
+
+**三级cache**的系统
+
+![image-20250922161334333](running_linux_armv8.assets/image-20250922161334333.png)
+
+### 多级cache的处理流程
+
+举例：
+
+```asm
+	LDR x0,[x1]
+```
+
+加载x1地址的值到x0，假设x1是cachable的
+
+![image-20250922170619435](running_linux_armv8.assets/image-20250922170619435.png)
+
+- **Case1**: 如果x1的值在**L1 cache**中，那么CPU直接从**L1 cache**获取了数据
+- **Case2**: 如果x1的值不在**L1 cache**中，而是在**L2 cache**中
+  - 如果**L1 cache**中没有空间，那么会淘汰一些**cache line**
+  - 数据从**L2 cache line**加载到**L1 cache line**
+  - CPU从**L1 cache line**中读取数据
+- **Case3**: x1的值都不在L1和L2 **cache**中，但是在内存中
+  - 如果**L1 cache**和**L2 cache**中没有空间，那么会淘汰一些**cache line**
+  - 数据从内存中加载到L2和L1的**cache line**中
+  - CPU从**L1 cache line**中读取数据
+
+### 多级cache的访问延迟
+
+![image-20250922171339545](running_linux_armv8.assets/image-20250922171339545.png)
+
+### Cache的策略（Cache Policies）
+
+- Cache相关的策略是**在MMU页表中配置**。**只有Normal内存可以被cacheable**
+- Cache策略包括：
+  - Cacheable/non-cacheable
+  - Cacheable细分
+    - Read/write-allocate
+    - Write-Back cacheable, write-through cacheable
+    - Shareability
+
+
+
+- Cache 的分配策略
+  - Write allocation: 当write miss的时候才分配一个新的cache line
+  - Read allocation: 当read miss的时候才分配一个新的cache line
+- Cache回写策略：
+  - Write-back: 回写操作仅仅更新到cache，并没有马上更新回内存(cache line is marked as dirty)
+  - Write through: 回写操作会直接更新cache和内存
+
+#### Write Back和Write Through
+
+
+
+
+
+![image-20250922174043566](running_linux_armv8.assets/image-20250922174043566.png)
