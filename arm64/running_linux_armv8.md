@@ -4656,6 +4656,476 @@ arch/arm64/mm/mmu.c
 
 
 
-
-
 ![image-20250922174043566](running_linux_armv8.assets/image-20250922174043566.png)
+
+- WT写直通模式
+  - 进行写操作时，数据同时写入当前的高速缓存，下一级高速缓存或主存储器中
+  - 直写模式可以降低高速缓存一致性的实现难度，最大的缺点是消耗比较多的总线带宽
+- ARM Cortex-A系列处理器把WT模式看成Non-cacheable
+  - The Cortex-A72 processor memory system treats all Write-Through pages as Non-cacheable
+- WB模式回写模式
+  - 在进行写操作时，数据直接写入当前高速缓存，而不会继续传递，当该高速缓存行被替换出去时，被改写的数据才会更新到下一级高速缓存或主存储器中。该策略增加了高速缓存一致性的实现难度，但是有效降低了总线带宽需求。
+  - Cache line变成Dirty data
+
+#### Inner 和 Outer Shareability
+
+- **Normal memory**可以设置inner或者outer shareability
+- 怎么区分是inner或者outer，不同设计有不同的区分
+  - **inner attribute**通常是**CPU IP**集成的caches
+  - **outer attribute** are exported on the bus
+
+![image-20250922190239281](running_linux_armv8.assets/image-20250922190239281.png)
+
+
+
+
+
+
+
+![image-20250922190633835](running_linux_armv8.assets/image-20250922190633835.png)
+
+![image-20250922190703269](running_linux_armv8.assets/image-20250922190703269.png)
+
+- inner attribute是内部集成的cache
+- outer attribute是挂载在外部总线的外部cache
+
+![image-20250922190725856](running_linux_armv8.assets/image-20250922190725856.png)
+
+
+
+### Point of Unification(PoU)和Point of Coherency(PoC)
+
+- **PoU**: 表示一个CPU中的**指令cache**，**数据cache**还有**MMU**，**TLB**等看到的是同一份的内存拷贝
+  - **PoU for a PE**，是说保证**PE**看到的**I/D cache**和**MMU**是同一份拷贝。大多情况下，**PoU是站在单核系统的角度来观察的**
+  - **PoU for inner share**，意思是说在**inner share**里面的所有**PE**都能看到相同的一份拷贝
+- **PoC**: 系统中所有的观察者例如**DSP**, **GPU**, **CPU**, **DMA**等都能看到同一份内存拷贝
+
+
+
+![image-20250922191415284](running_linux_armv8.assets/image-20250922191415284.png)
+
+![image-20250922191831728](running_linux_armv8.assets/image-20250922191831728.png)
+
+#### PoU和Poc的区别
+
+- **PoC**是系统一个概念，和系统配置相关
+- 例如，**Cortex-A53**可以配置**L2 cache**和没有**L2 cache**，可能会影响**PoU**的范围
+
+![image-20250922192009950](running_linux_armv8.assets/image-20250922192009950.png)
+
+![image-20250922192115229](running_linux_armv8.assets/image-20250922192115229.png)
+
+### Cache维护
+
+- Cache的管理操作
+  - 无效 (**Invalidate**)  整个高速缓存或者某个高速缓存行。高速缓存上的数据会被丢弃。
+  - 清除 (**Clean**) 整个高速缓存或者某个告诉缓存行。相应的告诉缓存行会被标记为脏，数**据会写回到下一级高速缓存中或者主存储器中**（也可称为flush）
+  - 清零 (**Zero**) 操作
+- Cache管理的对象
+  - **ALL** : 整块高速缓存
+  - **VA**:   某个虚拟地址
+  - **Set/Way**: 特定的告诉缓存行或者组和路
+- Cache管理的范围
+  - **PoC**
+  - **PoU**
+- Shareability
+  - **inner**
+
+
+
+### Cache指令格式
+
+
+
+![image-20250922192804276](running_linux_armv8.assets/image-20250922192804276.png)
+
+![image-20250922193009565](running_linux_armv8.assets/image-20250922193009565.png)
+
+![image-20250927164329862](running_linux_armv8.assets/image-20250927164329862.png)
+
+### Cache的枚举(Cache discovery)
+
+- 在我们做cache指令管理的时候，你需要知道如下信息：
+  - 系统支持多少级的cache?
+  - Cache line是多少
+  - 每一级的cache，它的set和way是多少
+  - 对于zero操作，我们需要知道多少data可以被zeroed?
+
+![image-20250922193251688](running_linux_armv8.assets/image-20250922193251688.png)
+
+
+
+- Cache Level ID Register (**CLIDR**, **CLIDR_EL1**)：列出有多少level的cache
+- Cache Type Register(**CTR, CRT_EL0**): cache line大小
+- sets and ways: 需要访问两个寄存器来获取
+  - 告诉Cache Size Selection Register(**CSSELR**, **CSSELR_EL1**)要查询哪个cache
+  - 从Cache Size ID Register(**CCSIDR**, **CCSIDR_EL1**)中读取相关信息
+
+## Cache一致性
+
+![image-20250922193820865](running_linux_armv8.assets/image-20250922193820865.png)
+
+### 为什么要cache一致性(cache coherency)?
+
+- 系统中各级cache都有不同的数据备份，例如每个CPU核心都有**L1 cache**
+
+![image-20250923111155702](running_linux_armv8.assets/image-20250923111155702.png)
+
+
+
+- **cache一致性关注的是同一个数据在多个高速缓存和内存中的一致性问题**，解决高速缓存一致性的方法主要是总线监听协议，例如**MESI**协议
+- 需要关注cache一致性的例子：
+  - **驱动中使用DMA**(数据cache和内存不一致)
+  - **Self-modifying code**(数据cache的数据可能比指令cache新)
+  - **修改了页表**(TLB里保存的数据可能过时)
+
+
+
+**ARM**的**cache**一致性的演进
+
+![image-20250923111839438](running_linux_armv8.assets/image-20250923111839438.png)
+
+- Cortex-A8是单核架构，没有核心之间的cache一致性问题，但是存在DMA和cache之间的一致性问题
+- Cortex-A9的多核版本(MPCore)存在核心之间的cache一致性问题，通常的做法是在硬件上实现一个**MESI**协议
+- Cortex-A15出现了大小核架构(**big.LITTLE**)，比如一个cluster全部是大核另一个全部是小核，因此**cluster和cluster之间也需要cache的一致性**，需要**AMBA Coherency Extension**来处理，在ARM中有现成的**IP**(在 **IC 设计** 里，IP 核 = 已经设计好、验证过的电路模块，可以作为“积木”直接拿来复用)可以使用，比如**CCI-400**和**CCI-500**
+
+
+
+- 单核处理器(Cortex-A8)
+  - 单核，没有cache一致性问题
+  - Cache管理指令仅仅作用于单核
+- 多核处理器(Cortex-A9 MP以及之后的处理器)
+  - 硬件上支持cache一致性
+  - Cache管理指令会广播到其他CPU核心
+
+![image-20250923120136563](running_linux_armv8.assets/image-20250923120136563.png)
+
+
+
+![image-20250923120437203](running_linux_armv8.assets/image-20250923120437203.png)
+
+
+
+
+
+### 系统级别的cache一致性
+
+- 系统cache一致性需要cache一致性内部总线(**cache coherent interconnect**)
+  - **AMBA 4**协议有**ACE**(**AXI Coherency Extensions**)
+  - **AMBA 5**协议有**CHI**
+
+![image-20250923120743589](running_linux_armv8.assets/image-20250923120743589.png)
+
+### Cache一致性的解决方案
+
+1. 关闭cache
+
+   - 优点：简单
+   - 缺点：性能低下，功耗增加
+
+2. 软件维护cache一致性
+
+   - 优点：硬件RTL实现简单
+   - 缺点：
+     - 软件复杂度增加。软件需要手动clean/flush cache或者invalidate cache
+     - 增加调试难度
+     - 降低性能和增加功耗
+
+3. 硬件维护cache一致性
+
+   **MESI**协议来维护**多核cache一致性**。**ACE接口**来实现系统级别的cache一致性
+
+   - 优点：对软件透明
+   - 缺点：增加了硬件RTL实现难度和复杂度
+
+### 多核之间的Cache一致性
+
+- 多核CPU产生cache一致性的原因：**同一个内存数据在多个CPU核心的L1 cache中存在多个不同的副本**，导致数据不一致
+
+- 维护cache一致性的关键是**跟踪每一个cache line的状态**，并根据处理器的读写操作和总线上的相应传输来更新cache line在不同CPU内核上的cache的状态，从而维护cache一致性
+
+#### Cache一致性协议
+
+  - **监听协议 **(**snooping protocol**)，每个高速缓存都要被监听或者监听其他高速缓存的总线活动
+
+  - **目录协议** (**directory protocol**)，全局统一管理高速缓存状态
+
+- **MESI**协议：
+  - 1983年，**James Goodman**提出**Write-Once**总线监听协议，后来演变成目前最流行的**MESI**协议
+  - **所有总线传输事务对于系统所有的其他单元是可见的**，因为总线是一个**基于广播通信**的介质，因而可以由每个处理器的高速缓存来进行监听
+
+![image-20250923122751522](running_linux_armv8.assets/image-20250923122751522.png)
+
+**Snoop control unit**单元实现总线监听和广播
+
+每个CPU的L1 cache也实现了总线监听功能
+
+#### MESI协议
+
+- 每个cache line有四个状态
+  - 修改(**Modified**)
+  - 独占(**Exclusive**)
+  - 共享(**Shared**)
+  - 失效(**Invalid**)
+
+![image-20250923123345411](running_linux_armv8.assets/image-20250923123345411.png)
+
+- 修改**M**和独占状态**E**的cache line，数据都是独有的，不同点在于修改状态的数据是脏的，和内存不一致，而独占态的数据是干净的和内存一致。脏的cache line会被回写到内存，其后的状态变成共享态。
+- 共享状态**S**的cache line，数据和其他cache共享，只有干净的数据才能被多个cache共享
+- **I**状态表示这个cache line无效
+
+#### MESI的操作
+
+![image-20250923124258020](running_linux_armv8.assets/image-20250923124258020.png)
+
+#### MESI状态图
+
+![image-20250923124527359](running_linux_armv8.assets/image-20250923124527359.png)
+
+- 本地处理器请求
+
+  - **PrRd**    表示 Processor Read，本地核发出读请求
+
+  - **PrWr**   表示 Processor Write，本地核发出写请求
+
+- 总线事务
+
+  > 表示其他核心在总线上的广播，本地cache需要snoop
+
+  - **BusRd** 读请求（读内存/读一个核心的cache）
+  - **BusRdX** 请求独占，Read Exclusive(需要无效化别人的副本)相当于Bus Write
+  - **FlushOpt** 写回或响应cache把数据推到总线
+  - **Writeback** 把Modified的数据写回内存
+
+  
+
+MESI主要解决的是每个CPU中的local cache之间的一致性问题
+
+![image-20250923130621306](running_linux_armv8.assets/image-20250923130621306.png)
+
+![image-20250923132435585](running_linux_armv8.assets/image-20250923132435585.png)
+
+![image-20250923132607021](running_linux_armv8.assets/image-20250923132607021.png)
+
+![image-20250923132508848](running_linux_armv8.assets/image-20250923132508848.png)
+
+#### MESI协议分析的一个例子
+
+- 假设系统中有4个CPU，每个CPU都有各自一级缓存，它们都想访问相同地址的数据A，大小为64字节。
+  - T0时刻：4个CPU的L1 cache都没有缓存数据A，cache line的状态为I（无效的）
+  - T1时刻：CPU0率先发起访问数据A的操作
+  - T2时刻：CPU1也发起读数据操作
+  - T3时刻：CPU2的程序想修改数据A中的数据
+- 请分析上述过程中，MESI状态的变化
+
+T0时刻
+
+![image-20250926185312953](running_linux_armv8.assets/image-20250926185312953.png)
+
+T1时刻
+
+![image-20250926185352356](running_linux_armv8.assets/image-20250926185352356.png)
+
+T2时刻
+
+![image-20250926185601096](running_linux_armv8.assets/image-20250926185601096.png)
+
+T3时刻
+
+![image-20250926185827974](running_linux_armv8.assets/image-20250926185827974.png)
+
+#### 高速缓存伪共享(False Sharing)
+
+- 如果多个处理器同时访问一个缓存行中不同的数据时，带来了性能上的问题
+- 举个例子：假设CPU0上的线程0想访问和更新struct data数据结构中的x成员，同理CPU1上的线程1想访问和更新struct data数据结构中的y成员，其中x和y成员都被缓存到同一个缓存行里。
+
+
+
+![image-20250926190200880](running_linux_armv8.assets/image-20250926190200880.png)
+
+
+
+
+
+分析：
+
+![image-20250926190303968](running_linux_armv8.assets/image-20250926190303968.png)
+
+![image-20250926190355720](running_linux_armv8.assets/image-20250926190355720.png)
+
+![image-20250926190325467](running_linux_armv8.assets/image-20250926190325467.png)
+
+![image-20250926190522394](running_linux_armv8.assets/image-20250926190522394.png)
+
+![image-20250926190632492](running_linux_armv8.assets/image-20250926190632492.png)
+
+![image-20250926190734587](running_linux_armv8.assets/image-20250926190734587.png)
+
+之后会不停地在T4和T5之间重复，争夺cache line，不断地让对方的cache line无效，触发高速缓存写回内存。
+
+
+
+
+
+**解决办法**
+
+- 高速缓存伪共享的解决办法就是**让多线程操作的数据处在不同的告诉缓存行**，通常可以采用**高速缓存行填充(padding)技术**或者**高速缓存行对齐(align)技术**，即让数据结构按照高速缓存行对齐，并且尽可能填充满一个高速缓存行大小。
+- 下面一个代码定义一个counter_s数据结构，它的起始地址按照高速缓存行的大小对齐，数据结构的成员通过pad[4]来填充。这样，counter_s的大小正好是一个cache line的大小，64个字节，而且它的起始地址也是cache line对齐
+
+![image-20250926191358655](running_linux_armv8.assets/image-20250926191358655.png)
+
+尽可能让counter_s独占一个cache line而不和其他数据结构共享一个cache line
+
+
+
+### 系统间的Cache一致性
+
+![image-20250926191931201](running_linux_armv8.assets/image-20250926191931201.png)
+
+![image-20250926192017528](running_linux_armv8.assets/image-20250926192017528.png)
+
+ARM面向服务器市场的CCI是CoreLink CCN
+
+![image-20250926192041425](running_linux_armv8.assets/image-20250926192041425.png)
+
+![image-20250926192148879](running_linux_armv8.assets/image-20250926192148879.png)
+
+#### 读数据的例子
+
+![image-20250926192315171](running_linux_armv8.assets/image-20250926192315171.png)
+
+![image-20250926192323816](running_linux_armv8.assets/image-20250926192323816.png)
+
+![image-20250926192339995](running_linux_armv8.assets/image-20250926192339995.png)
+
+![image-20250926192358585](running_linux_armv8.assets/image-20250926192358585.png)
+
+
+
+![image-20250926192408097](running_linux_armv8.assets/image-20250926192408097.png)
+
+#### 写数据的例子
+
+![image-20250926192518082](running_linux_armv8.assets/image-20250926192518082.png)
+
+![image-20250926192529924](running_linux_armv8.assets/image-20250926192529924.png)
+
+
+
+![image-20250926192549718](running_linux_armv8.assets/image-20250926192549718.png)
+
+![image-20250926192703144](running_linux_armv8.assets/image-20250926192703144.png)
+
+![image-20250926192751674](running_linux_armv8.assets/image-20250926192751674.png)
+
+
+
+### Cache一致性的案例
+
+#### 案例1：高速缓存伪共享的避免
+
+- 一些常用的数据结构在定义时就约定**数据结构以一级缓存对齐**。例如使用如下的宏来让数据结构首地址以L1 cache对齐
+
+```c
+#define cacheline_aligned __attribute__((__aligned__(L1_CACHE_BYTES)))
+```
+
+
+
+- **数据结构频繁访问的成员可以单独占用一个高速缓存行**，或者相关的成员在**高速缓存行中彼此错开**，以提高访问效率。例如struct zone数据结构使用**ZONE_PADDING**技术(**填充字节**的方式)来让频繁访问的成员在不同的cache line中
+
+  ![image-20250926193554817](running_linux_armv8.assets/image-20250926193554817.png)
+
+#### 案例2：DMA的cache一致性
+
+> DMA (Direct Memory Access)直接内存访问，它在传输过程中时不需要CPU干预的，可以直接从内存中读写数据
+
+- DMA产生cache一致性问题的原因：
+  - **DMA直接操作系统总线来读写内存，而CPU并不感知**
+  - 如果**DMA修改的内存地址，在CPU的cache中有缓存**，那么CPU并不知道内存数据被修改了，CPU依然去访问cache的旧数据，导致Cache一致性问题
+
+![image-20250926193831213](running_linux_armv8.assets/image-20250926193831213.png)
+
+**DMA的cache一致性解决方案**
+
+- 硬件解决办法，需要ACE支持（咨询SoC vendor）
+
+- 使用non-cacheable的内存来进行DMA传输
+
+  - 缺点：在不使用DMA的时候，CPU访问这个buffer会导致性能下降
+
+- 软件干预cache一致性，根据DMA传输数据的方向，软件来维护cache一致性
+
+  - Case 1: 内存->设备FIFO (设备例如网卡，**通过DMA读取内存数据到设备FIFO**)
+
+    - 在DMA传输之前，CPU的cache可能缓存了内存数据，需要调用cache clean/flush操作，把cache内容写入到内存中，因为CPU cache里可能缓存了最新的数据。
+
+    ![image-20250926194906475](running_linux_armv8.assets/image-20250926194906475.png)
+
+  - Case 2: 设备FIFO->内存(设备把数据写入到内存中)
+
+    - 在DMA传输之前，需要把cache做invalid操作。因为此时最新数据在设备FIFO中，CPU缓存的cache数据是过时的，一会要写入新数据所以做invalid操作
+
+    ![image-20250926195158158](running_linux_armv8.assets/image-20250926195158158.png)
+
+#### 案例3：self-modifying code
+
+- 指令cache和数据cache是分开的。指令cache一般只读
+
+- 指令cache和数据cache的一致性问题。指令通常不能修改，但是在某些特殊情况下指令存在被修改的情况
+
+- self-modifying code，在执行过程中修改自己的指令（防止软件破解，或者gdb调试代码动态修改程序），过程如下
+
+  - **要把修改的指令，加载到数据cache里**
+  - 程序(CPU)修改新指令，数据cache里缓存了最新指令
+
+  存在问题：
+
+  - 指令cache依然缓存了旧的指令，新指令还在数据cache里
+
+  ![image-20250926195738540](running_linux_armv8.assets/image-20250926195738540.png)
+
+
+
+**解决思路**：
+
+- 使用cache clean操作，把cache line的数据写回到内存
+- 使用DSB指令保证其他观察者看到clean操作已经完成
+- 无效指令cache
+- 使用DSB指令确保其他观察者看到无效操作已经完成
+- ISB指令让程序重新预取指令
+
+![ARMv8.6手册B2.4.4章](running_linux_armv8.assets/image-20250926195803881.png)
+
+### armv8芯片手册Cache
+
+- **ARM Architecture Reference Manual Armv8, for Armv8-A architecture profile**
+
+  - **B2.4 Caches and memory hierarchy**
+
+- **D4.4 Cache Support**
+  
+- **D5.11 Caches in a VMSAv8-64 implementation**
+
+- **ARM Cortex-A Series Programmer's Guide for ARMv8-A**
+  - **Chapter 11 Cache**
+- **ARM Cortex-A72 MPCore Processor Technical Reference Manual**
+  - **6： Level 1 Memory System**
+  - **7：Level 2 Memory System**
+
+
+
+
+### Cache实验一：cache的枚举
+
+![image-20250927172720572](running_linux_armv8.assets/image-20250927172720572.png)
+
+### Cache实验二：false sharing
+
+![image-20250927173712707](running_linux_armv8.assets/image-20250927173712707.png)
+
+
+
+### Cache实验三：flush cache实验
+
+![image-20250927173812637](running_linux_armv8.assets/image-20250927173812637.png)
