@@ -4494,6 +4494,19 @@ arch/arm64/mm/mmu.c
 
 ![image-20250921195738818](running_linux_armv8.assets/image-20250921195738818.png)
 
+### Cache的类型
+
+ARM64 架构上主要有：
+
+- **Instruction Cache (I-Cache)**
+   专门缓存指令流，加快取指速度。
+- **Data Cache (D-Cache)**
+   缓存数据读写（Load/Store）。
+- **Unified Cache**
+   一些层级（如 L2、L3）往往是统一缓存（既存指令也存数据），不像 L1 那样严格分指令/数据。
+
+有时称既有I-Cache也有D-Cache的为Separate Cache，它是分离缓存结构：既有独立的 I-Cache，又有独立的 D-Cache。典型于 **L1 Cache**。
+
 ### Cache映射方式
 
 #### 直接映射
@@ -4570,10 +4583,44 @@ arch/arm64/mm/mmu.c
 ### 高速缓存分类
 
 - **VIVT** (Virtual Index Virtual Tag):  使用虚拟地址的索引域和虚拟地址的标记域，相当于是虚拟高速缓存
+  - CPU 在访问缓存时，不需要先进行地址转换（虚拟地址 → 物理地址），直接用虚拟地址来决定缓存行（index）和匹配标记（tag）。
+  - 存在别名问题 (Synonym/Aliasing)：不同虚拟地址映射到同一物理地址时，会在缓存中出现多份数据，可能导致数据不一致。
+
 - **PIPT** (Physical Index Physical Tag): 使用物理地址索引域和物理地址标记域，相当于是物理高速缓存
+  - CPU 先通过 MMU 将虚拟地址转换成物理地址，然后用物理地址进行缓存索引和匹配。
+  - 不存在别名问题
+  - 常见L2 Cache
+
 - **VIPT** (Virtual Index Physical Tag): 使用虚拟地址索引域和物理地址的标记域
+  - CPU 使用虚拟地址的低位部分作为缓存索引（Index）。使用物理地址作为标记（Tag），用于匹配判断。因为缓存行对齐（通常是 64 字节或 128 字节），虚拟地址低位与物理地址低位一致，所以可以安全地用虚拟地址索引。
+  - 避免了别名问题，因为使用了物理地址作为标记
+  - 受 **Page Size** 限制：虚拟索引长度必须 ≤ 页面偏移位数，否则不同页的同一虚拟索引会冲突。（VIPT 用虚拟地址的低位索引缓存行）
+  - 常见L1 Cache
+
 
 #### VIPT工作过程
+
+一般视角下：
+
+```
+						VA = 虚拟页号 (VPN) | 页内偏移 (PO)
+```
+
+VIPT视角下PO分成：
+
+```
+						PO = Cache Index | Cache Line Offset
+```
+
+假设 L1 Cache 有 64KB，缓存行 64B：
+
+- 索引位数 = log₂(64KB / 64B) = log₂(1024) = 10 位
+- 所以缓存索引使用虚拟地址的 **10 位**
+- 页内偏移 = 12 位（4KB 页）
+
+所以要求：索引位 ≤ 页内偏移位
+
+
 
 ![image-20250922160506763](running_linux_armv8.assets/image-20250922160506763.png)
 
@@ -5119,6 +5166,168 @@ ARM面向服务器市场的CCI是CoreLink CCN
 ### Cache实验一：cache的枚举
 
 ![image-20250927172720572](running_linux_armv8.assets/image-20250927172720572.png)
+
+实验运行结果：
+
+![image-20250928191458830](running_linux_armv8.assets/image-20250928191458830.png)
+
+#### 相关寄存器
+
+##### CCSIDR_EL1
+
+> Current Cache Size ID Register 
+
+![image-20251001203428403](running_linux_armv8.assets/image-20251001203428403.png)
+
+
+
+![image-20251001203446704](running_linux_armv8.assets/image-20251001203446704.png)
+
+| Bits  | 名称              | 含义                                                         |
+| ----- | ----------------- | ------------------------------------------------------------ |
+| 63:56 | **RES0**          | 保留位                                                       |
+| 55:32 | **NumSets**       | Cache 中的 set 数减 1 → 实际 set 数 = NumSets + 1注意：set 数不一定是 2 的幂 |
+| 31:24 | **RES0**          | 保留位                                                       |
+| 23:3  | **Associativity** | 描述 cache 的 **way 数**（每个 set 有多少 cache line），Cache 的关联度（ways）减 1 → 实际 associativity = Associativity + 1注意：不一定是 2 的幂 |
+| 2:0   | **LineSize**      | Cache line 大小的 log2 减 4计算公式：`line_size_bytes = 1 << (LineSize + 4)` |
+
+
+
+![image-20251001205609945](running_linux_armv8.assets/image-20251001205609945.png)
+
+如果**ARMv8.5-MemTag** is **implemented**
+
+
+
+![image-20251001203536572](running_linux_armv8.assets/image-20251001203536572.png)
+
+##### CCSIDR2_EL1
+
+> Current Cache Size ID Register 2
+
+**ARMv8.3-CCIDX is implemented**才有效
+
+![image-20251001202608768](running_linux_armv8.assets/image-20251001202608768.png)
+
+| Bits  | 名称    | 含义                                                         |
+| ----- | ------- | ------------------------------------------------------------ |
+| 63:24 | RES0    | 保留位，读写无意义                                           |
+| 23:0  | NumSets | Cache 中的 set 数目减 1**计算方法**：`NumSets + 1` 得到实际的 set 数**注意**：set 数不一定是 2 的幂 |
+
+- **用途**：查询指定 cache 的 **set 数量**。
+- 该寄存器一般与 **CSSELR_EL1** 配合使用：
+  1. 写 CSSELR_EL1 选择 Cache Level 和类型（数据/指令/Tag）
+  2. 读 CCSIDR2_EL1 得到该 cache 的 set 数
+- **NumSets = 0** 表示 **1 个 set**
+- **NumSets > 0** 表示实际 set 数 = NumSets + 1
+
+![image-20251001202632041](running_linux_armv8.assets/image-20251001202632041.png)
+
+读取CCSIDR2_EL1注意事项：
+
+![image-20251001202712689](running_linux_armv8.assets/image-20251001202712689.png)
+
+##### CLIDR_EL1
+
+> Cache Level ID Register
+
+![image-20251001210043310](running_linux_armv8.assets/image-20251001210043310.png)
+
+- **用途**：
+  - 标识处理器每一级 cache 的类型（Instruction/Data/Unified/Tag）。
+  - 指出可以使用 **Set/Way cache maintenance instructions** 管理的 cache。
+  - 提供 **缓存层次的一致性与共享级别信息**（LoC、LoU、LoUIS）。
+  - 支持最多 7 级缓存。
+
+
+
+| Bits  | 名称            | 含义                                                         |
+| ----- | --------------- | ------------------------------------------------------------ |
+| 63:47 | RES0            | 保留位                                                       |
+| 46:35 | Ttype（n=1..7） | Tag Cache 类型 <br/>    0b00: 无 Tag Cache<br />    0b01: Separate Allocation Tag Cache<br />    0b10: Unified Allocation Tag + Data (同一行)<br />    0b11: Unified Allocation Tag + Data (分行) |
+| 34:32 | ICB             | Inner Cache Boundary（内部缓存边界）<br/>    0b000: Not disclosed by this mechanism.<br />    0b001: L1 is the highest **Inner Cacheable** level<br />    0b010: L2 is the highest **Inner Cacheable** level<br />    …....<br />    0b110: L6 is the highest **Inner Cacheable** level<br />    0b111: L7 is the highest **Inner Cacheable** level |
+| 31:29 | LoUU            | Level of Unification Uniprocessor                            |
+| 28:26 | LoC             | Level of Coherence                                           |
+| 25:23 | LoUIS           | Level of Unification Inner Shareable                         |
+| 22:0  | Ctype（n=1..7） | Cache Type（每一级缓存类型）<br />     0b000: **No cache**<br />     0b001: **Instruction cache** only<br />     0b010: **Data cache** only<br />     0b011: **Seprate instruction and data cache**<br />     0b100: **Unified cache** |
+
+
+
+##### CSSELR_EL1
+
+> Cache Size Selection Register
+
+![image-20251001200813032](running_linux_armv8.assets/image-20251001200813032.png)
+
+| Bits | 名称      | 含义                                                         |
+| ---- | --------- | ------------------------------------------------------------ |
+| 63:5 | **RES0**  | 保留位，读写无意义                                           |
+| 4    | **TnD**   | **Allocation Tag not Data**：是否选择单独的 Allocation Tag cache <br />      0b0 → 数据、指令或统一缓存  <br />      0b1 → 单独 Allocation Tag cache<br />注意：当 `InD = 1`（指令缓存）时，这个位为 RES0（无效） |
+| 3:1  | **Level** | 要查询的缓存级别（Cache Level）<br />     0b000 → L1<br />     0b001 → L2<br />     0b010 → L3<br />     0b011 → L4<br />     0b100 → L5<br />     0b101 → L6<br />     0b110 → L7<br />其他值保留注意：如果选择了未实现的缓存级别，读取 CSSELR_EL1 返回值是不确定的 |
+| 0    | **InD**   | **Instruction not Data**：缓存类型: <br />    0b0 → 数据或统一缓存 ( **Data Cache or Unified Cache** )<br />    0b1 → 指令缓存 ( **Instruction Cache** )<br/>如果选择未实现的缓存级别，读取 CSSELR_EL1 的 Level 和 InD 返回值是不确定的 |
+
+![image-20251001201006377](running_linux_armv8.assets/image-20251001201006377.png)
+
+![image-20251001201032409](running_linux_armv8.assets/image-20251001201032409.png)
+
+![image-20251001201048212](running_linux_armv8.assets/image-20251001201048212.png)
+
+
+
+
+
+
+
+
+
+##### CTR_EL0
+
+> Cache Type Regiser
+
+作用是提供cache的架构信息
+
+![image-20251001195323638](running_linux_armv8.assets/image-20251001195323638.png)
+
+| 位域  | Bits                    | 名称                                                         | 描述                                                         |
+| ----- | ----------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 63-38 | **RES0**                | Reserved                                                     | 保留，读出为 0                                               |
+| 37-32 | **TimeLine**            | Tag minimum Line                                             | Tag 最小 line 粒度，表示 Allocation Tag 覆盖的最小 cache line 的大小（log2(以 word=4B 为单位))与**Memory Tagging Extension (MTE)**有关 |
+| 31    | **RES1**                | Reserved                                                     | 保留，固定为 1                                               |
+| 30    | **RES0**                | Reserved                                                     | 保留，固定为 0                                               |
+| 29    | **DIC**                 | **Instruction cache invalidation requirements for data to instruction coherence** | 决定是否需要做 I-cache invalidate 来保证数据写入对 I-cache 可见<br/>      0 = 数据写入后，必须 invalidate I-cache 才能让指令取到最新数据。<br/>      1 = 不需要 invalidate I-cache。 |
+| 28    | **IDC**                 | **Data cache clean requirements for instruction to data coherence** | 决定是否需要清理（clean）D-cache 来保证 I/D 一致性<br/>      0 = 数据 cache 需要 clean 到 PoU 才能保证 I/D 一致性。<br/>      1 = 不需要 D-cache clean。<br />      通常现代核都置 1，表示硬件自动保证一致性 |
+| 27-24 | **CWG**                 | **Cache Writeback Granule**                                  | **Cache Writeback Granule**，缓存写回的最大粒度（log2(以 word=4B 为单位)）。表示当一个 cache line 写回时，可能影响的最大内存块大小（以 word=4B 为单位）。<br/>例如 CWG=0b0100 → 2^(4) = 16 words = 64 bytes。 |
+| 23-20 | **ERG**                 | **Exclusives reservation granule**                           | **Exclusive Reservation Granule**，原子指令（LDXR/STXR）的最大 reservation 范围粒度（log2(以 word=4B 为单位)） |
+| 19-16 | **DminLine**            | **D minline**                                                | Data cache 最小 line 大小（log2(以 word=4B 为单位)）         |
+| 15-14 | **L1IP**                | **Level 1 Instruction cache policy**                         | L1 指令缓存寻址策略：<br/>    0 = **VPIPT**<br />    1 = **Reserved**<br />    2 = **VIPT**<br />    3 = **PIPT** |
+| 13-12 | **RES1**                | Reserved                                                     | 保留                                                         |
+| 3-0   | **IMINLINE / DMINLINE** | **Instruction minline / Data minline**                       | Instruction cache 最小 line 大小（log2(以 word=4B 为单位)）  |
+
+**L1Ip**  
+
+表示L1 Instrucion Cache的类型：
+
+![image-20251001195429878](running_linux_armv8.assets/image-20251001195429878.png)
+
+**Instruction cache invalidation requirements for data to instruction coherence**
+
+![image-20251001214717643](running_linux_armv8.assets/image-20251001214717643.png)
+
+**Data cache clean requirements from instruction to data coherence**
+
+![image-20251001214810306](running_linux_armv8.assets/image-20251001214810306.png)
+
+**Cache Writeback Granule**
+
+![image-20251001215853347](running_linux_armv8.assets/image-20251001215853347.png)
+
+通常情况下，**CWG = 最大 cache line 大小**，因为写回是以整行（cache line）为单位的。
+
+但是，ARM 规范允许微架构不同：
+
+1. **CWG ≥ cache line size**：有些实现可能在写回时会把多个 cache line 合并成更大的突发写（burst），比如 128B。
+2. **CWG = cache line size**：常见情况，比如 line=64B → CWG=0b0100（16 words）。
+3. **CWG 未提供** (`0b0000`)：必须假设**最大写回粒度是 2KB**，或者自己去读 Cache Size ID Registers 推算。
 
 ### Cache实验二：false sharing
 
