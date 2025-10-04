@@ -5147,12 +5147,10 @@ ARM面向服务器市场的CCI是CoreLink CCN
 ### armv8芯片手册Cache
 
 - **ARM Architecture Reference Manual Armv8, for Armv8-A architecture profile**
-
   - **B2.4 Caches and memory hierarchy**
+  - **D4.4 Cache Support**
 
-- **D4.4 Cache Support**
-  
-- **D5.11 Caches in a VMSAv8-64 implementation**
+  - **D5.11 Caches in a VMSAv8-64 implementation**
 
 - **ARM Cortex-A Series Programmer's Guide for ARMv8-A**
   - **Chapter 11 Cache**
@@ -5802,6 +5800,8 @@ ARMv8.6芯片手册
 
 #### DMB指令
 
+> Ordering of Load/Store instructions
+
 - 仅仅影响数据访问（explicit data accesses，例如load和store）的**访问序列**
 - Data cache指令也算数据访问
 - 保证在**DMB之前的数据访问**可以被**DMB后面的数据访问指令**观察到
@@ -5821,6 +5821,8 @@ ARMv8.6芯片手册
 
 #### DSB指令
 
+> Completion of Load/Store instructions
+
 - DSB指令比DMB指令严格很多
 - 在**DSB指令后面的任何指令**，必须等到如下完成了，**才能开始执行**：
   - 在DSB指令前面的**所有数据访问**必须执行完成
@@ -5839,7 +5841,7 @@ ARMv8.6芯片手册
 
 ![image-20251004194136890](running_linux_armv8.assets/image-20251004194136890.png)
 
-- 在一个多核系统中，cache和TLB指令会广播到其他core，所以DSB指令会等到这些指令广播并收到回复才算完成
+- 在一个**多核系统**中，cache和TLB指令会广播到其他core，所以DSB指令会等到这些指令广播并收到回复才算完成
 
 **dmb与dsb的区别**，例子：
 
@@ -5915,10 +5917,13 @@ DSB指令保证，DMA引擎在启动前看到了最新的数据已经在DMA buff
   - 用于保护一个临界区数据
   - 在临界区的指令可以乱序（仅限临界区范围内）
   - 比全功能的DMB指令性能要好
+  - 对data cache维护指令没有作用，因为它不会去等待cache的广播
 
 ![image-20251004202029957](running_linux_armv8.assets/image-20251004202029957.png)
 
 #### 指令级别的内存屏障指令：ISB指令
+
+> Context synchronization
 
 - ISB指令威力巨大，它会**flush流水线**，然后**从指令cache或者内存中重新预取指令**。
 - ISB指令保证
@@ -5944,3 +5949,50 @@ DSB指令保证，DMA引擎在启动前看到了最新的数据已经在DMA buff
 #### ISB指令例子1：打开FPU
 
 ![image-20251004203353662](running_linux_armv8.assets/image-20251004203353662.png)
+
+改变了系统控制寄存器时需要一条isb指令
+
+#### ISB指令例子2：改变页表项
+
+![image-20251004232822428](running_linux_armv8.assets/image-20251004232822428.png)
+
+#### ISB指令例子3：self-modify code
+
+![image-20251004234037901](running_linux_armv8.assets/image-20251004234037901.png)
+
+- 在更新新代码内容(str x11,[x1])和clean数据cache指令之间没有使用内存屏障指令
+  - 更新代码的内容和clean数据cache都是操作相同的地址，并且都是数据相关的操作，他们之间有数据依赖性，可以理解为相同的观察者
+  - 他们之间可以保证程序执行的次序(program order)
+- 在clean数据cache和无效指令cache之间需要内存屏障
+  - 虽然这两条cache指令都是操作相同的地址，但是他们是不同的观察者（一个是数据端，另外一个是指令端）
+  - 这里的DSB保证clean完数据cache之后才去无效指令cache
+- 在一个多核一致性的系统中，DSB指令能保证cache维护指令执行完成，即其他CPU都能够观察到cache维护指令完成
+- ISB指令不会broadcast，因此CPU1也需要执行isb指令
+
+#### 总结：内存屏障指令与cache/TLB维护指令
+
+- data cache或者unified cache维护指令
+  - 可以使用DMB指令来保证cache维护指令在指定的shareable domain中执行完成
+  - Load-acquire和store-release屏障对data cache维护指令没有作用（因为它不会去等待cache的广播）
+- 指令cache维护指令
+  - 指令cache和数据cache在内存观察者角度看，是两个不同的观察者
+  - 在指令cache和维护操作完成之后执行一条DSB指令，确保inner shareable domain里所有的CPU核心都能看到这条指令cache的执行完成
+- TLB维护指令
+  - 遍历页表的单元和数据访问的硬件单元，其实是两个不同的内存系统的观察者
+  - 在TLB维护指令后面需要执行一条DSB指令，来保证inner shareable domain里面的所有CPU都能完成
+- **ISB指令不会broadcast**，如果需要每个CPU核心需要单独调用ISB指令
+
+
+
+#### 芯片手册阅读memory barrier
+
+- **ARM Architecture Reference Manual Armv8, for Armv8-A architecture profile**
+  - **B2.3.7 Memory barriers**
+  - (**重点**) **Appendix K11 Barrier Litmus Test**
+
+- **ARM Cortex-A Series Programmer's Guide for ARMv8-A**
+  - **13.2 Barriers**
+
+
+
+#### 再谈缓存一致性与内存屏障
