@@ -4521,7 +4521,7 @@ ARM64 架构上主要有：
 
 0x00,0x40,0x80都映射了同一个高速缓存行里，会频繁发生高速缓存替换性能较低
 
-#### 全关联
+#### 全相联
 
 > 当cache只有一个组，即主存中只有一个地址与n个cache line对应，成为全相联
 
@@ -5171,6 +5171,139 @@ ARM面向服务器市场的CCI是CoreLink CCN
 
 ![image-20250928191458830](running_linux_armv8.assets/image-20250928191458830.png)
 
+
+
+```c
+#include "cache_info.h"
+
+static const char *cache_type_string[] = {"nocache", "i-cache", "d-cache",
+                                          "separate cache", "unifed cache"};
+
+// instruction cache的policies
+// L1 指令缓存寻址策略
+// 0 = VPIPT
+// 1 = Reserved
+// 2 = VIPT
+// 3 = PIPT
+static const char *icache_policy_str[] = {
+    [0 ... ICACHE_POLICY_PIPT] = "RESERVED/UNKNOWN",
+    [ICACHE_POLICY_VIPT] = "VIPT",
+    [ICACHE_POLICY_PIPT] = "PIPT",
+    [ICACHE_POLICY_VPIPT] = "VPIPT",
+};
+
+// 读取CTR_EL0的CRT_CWG(Cache WriteBack Granule)
+// 缓存写回的最大粒度2^(val) * 4Byte
+static inline unsigned int cache_type_cwg(void) {
+  return (read_sysreg(CTR_EL0) >> CTR_CWG_SHIFT) & CTR_CWG_MASK;
+}
+
+// 通常情况下 cache_line_size = CWG
+// 获取cache的line size 2^(CWG) * 4 = 4 << CWG
+static inline int cache_line_size(void) {
+  unsigned int cwg = cache_type_cwg();
+  return 4 << cwg;
+}
+
+// 读取CLIDR_EL1, Cache Level ID Register
+// 获取cache的类型，读取CLIDR_EL1的CTYPE字段
+static inline enum cache_type get_cache_type(int level) {
+  unsigned long clidr;
+
+  if (level > MAX_CACHE_LEVEL)
+    return CACHE_TYPE_NOCACHE;
+  clidr = read_sysreg(clidr_el1);
+  return CLIDR_CTYPE(clidr, level);
+}
+
+/*
+ * 获取每一级cache的way和set
+ *
+ * 从树莓派官网可以知道：
+ * https://www.raspberrypi.org/documentation/hardware/raspberrypi/bcm2711/README.md
+ *
+ * Caches: 32 KB data + 48 KB instruction L1 cache per core. 1MB L2 cache.
+ * */
+static void get_cache_set_way(unsigned int level, unsigned int ind) {
+  unsigned long val;
+  unsigned int line_size, set, way;
+  int tmp;
+
+  /* 1. 先写CSSELR_EL1寄存器(Cache Size Selection Register)，告知要查询哪个cache
+   */
+  // 写入level和缓存类型（0b0 data cache or unified cache 还是0b1 instruction
+  // cache）
+  tmp = (level - 1) << CSSELR_LEVEL_SHIFT | ind;
+  write_sysreg(tmp, CSSELR_EL1);
+
+  /*
+   * 2.
+   * 读取CCSIDR_EL1寄存器的值，当没有实现ARMv8.3-CCIDX时，这个寄存器只有低32为有效。
+   * 注意这个寄存器有两种layout的方式。
+   * */
+  val = read_sysreg(CCSIDR_EL1);
+  // NumSets位域,描述cache的set数
+  set = (val & CCSIDR_NUMSETS_MASK) >> CCSIDR_NUMSETS_SHIFT;
+  set += 1;
+  // Associativity位域,描述cache的way数
+  way = (val & CCSIDR_ASS_MASK) >> CCSIDR_ASS_SHIFT;
+  way += 1;
+  // CCSIDR_EL1的LineSize位域
+  // line_size_bytes = 1 << (LineSize + 4)
+  line_size = (val & CCSIDR_LINESIZE_MASK);
+  line_size = 1 << (line_size + 4);
+
+  printk("          %s: set %u way %u line_size %u size %uKB\n",
+         ind ? "i-cache" : "d/u cache", set, way, line_size,
+         (line_size * way * set) / 1024);
+}
+
+int init_cache_info(void) {
+  int level;
+  unsigned long ctype;
+
+  printk("parse cache info:\n");
+  // 遍历每一级cache
+  for (level = 1; level <= MAX_CACHE_LEVEL; level++) {
+    /* 获取cache type */
+    ctype = get_cache_type(level);
+    /* 如果cache type为NONCACHE，则退出循环 */
+    if (ctype == CACHE_TYPE_NOCACHE) {
+      level--;
+      break;
+    }
+    printk("   L%u: %s, cache line size(CWG) %u\n", level,
+           cache_type_string[ctype], cache_line_size());
+    if (ctype == CACHE_TYPE_SEPARATE) {
+      get_cache_set_way(level, 1);
+      get_cache_set_way(level, 0);
+    } else if (ctype == CACHE_TYPE_UNIFIED)
+      get_cache_set_way(level, 0);
+  }
+
+  /*
+   * 获取ICB，LOUU，LOC和LOUIS
+   * ICB: Inner cache boundary
+   * LOUU: 单核处理器PoU的cache边界。
+   * LOC: PoC的cache边界
+   * LOUIS:PoU for inner share的cache边界。
+   * */
+  unsigned clidr = read_sysreg(clidr_el1);
+  printk("   IBC:%u LOUU:%u LoC:%u LoUIS:%u\n", CLIDR_ICB(clidr),
+         CLIDR_LOUU(clidr), CLIDR_LOC(clidr), CLIDR_LOUIS(clidr));
+
+  unsigned ctr = read_sysreg(ctr_el0);
+  printk("   Detected %s I-cache\n", icache_policy_str[CTR_L1IP(ctr)]);
+
+  return level;
+}
+
+```
+
+
+
+
+
 #### 相关寄存器
 
 ##### CCSIDR_EL1
@@ -5333,8 +5466,481 @@ ARM面向服务器市场的CCI是CoreLink CCN
 
 ![image-20250927173712707](running_linux_armv8.assets/image-20250927173712707.png)
 
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
 
+struct data_with_false_sharing {
+
+  unsigned long x;
+  unsigned long y;
+
+} __attribute__((__align__(64)));
+
+struct padding {
+
+  char x[0]
+} __attribute__((__align__(64)));
+
+struct data_without_false_sharing {
+
+  unsigned long x;
+  struct padding _pad;
+  unsigned long y;
+} __attribute__((__align__(64)));
+
+#define MAX_LOOP 10000000000
+void *access_data(void *param) {
+  unsigned long *data = (unsigned long *)param;
+  unsigned long i;
+  for (i = 0; i < MAX_LOOP; i++) {
+    *data = i;
+  }
+}
+
+int main(void) {
+  struct data_with_false_sharing data_wfs = {1, 2};
+  struct data_without_false_sharing data_wofs = {.x = 1, .y = 2};
+  pthread_t thread_1;
+  pthread_t thread_2;
+  unsigned long total_time;
+
+  struct timespec time_start, time_end;
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  pthread_create(&thread_1, NULL, &access_data, (void *)&data_wfs.x);
+  pthread_create(&thread_2, NULL, &access_data, (void *)&data_wfs.y);
+  pthread_join(thread_1, NULL);
+  pthread_join(thread_2, NULL);
+  clock_gettime(CLOCK_REALTIME, &time_end);
+  total_time = (time_end.tv_sec - time_start.tv_sec) * 1000 +
+               (time_end.tv_nsec - time_start.tv_nsec) / 1000000;
+  printf("cache with false sharing: %lu ms \n", total_time);
+
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  pthread_create(&thread_1, NULL, &access_data, (void *)&data_wofs.x);
+  pthread_create(&thread_2, NULL, &access_data, (void *)&data_wofs.y);
+  pthread_join(thread_1, NULL);
+  pthread_join(thread_2, NULL);
+  clock_gettime(CLOCK_REALTIME, &time_end);
+  total_time = (time_end.tv_sec - time_start.tv_sec) * 1000 +
+               (time_end.tv_nsec - time_start.tv_nsec) / 1000000;
+  printf("cache without false sharing: %lu ms \n", total_time);
+}
+
+```
+
+![image-20251003200217652](running_linux_armv8.assets/image-20251003200217652.png)
 
 ### Cache实验三：flush cache实验
 
 ![image-20250927173812637](running_linux_armv8.assets/image-20250927173812637.png)
+
+结果：
+
+![image-20251003201156450](running_linux_armv8.assets/image-20251003201156450.png)
+
+```asm
+
+.global get_cache_line_size
+get_cache_line_size:
+	mrs x0, ctr_el0	
+	ubfm x0, x0, #16, #19
+	mov x1, #4
+	lsl x0, x1, x0
+	ret
+
+/*
+   flush_cache_range(start, end)
+ */
+.global flush_cache_range
+flush_cache_range:
+  stp x29, x30, [sp, -16]!
+  // start  
+	mov x8, x0
+  // end
+	mov x9, x1
+	
+	bl get_cache_line_size
+  // x3 = cache_line_size -1
+	sub x3, x0, #1
+  // bit clear, x4 = x8 & (~x3)
+  // 把 start 地址向下对齐到 cache line 边界
+	bic x4, x8, x3
+  // 循环清理cacheline
+1:
+	dc civac, x4
+	add x4, x4, x0
+	cmp x4, x9
+	b.lo	1b
+
+	dsb	ish
+
+  ldp x29, x30, [sp], 16
+	
+	ret
+
+```
+
+## TLB基础知识
+
+- ARMv8.6 芯片手册与TLB相关内容
+
+  - D5.9章 **Translation Lookaside Buffers**（TLBs）
+
+  - D5.10章 TLB maintenance requirements and the TLB maintenance instructions
+
+### TLB背景知识
+
+- TLB是**cache**的一种
+- TLB的表项：**记录了最新使用的VA到PA的转换结果**
+
+![image-20251004145155955](running_linux_armv8.assets/image-20251004145155955.png)
+
+- TLB也支持全相连，支持直接映射，组相连等三种映射方式。
+- Cortex-A72采用两级TLB设计。类似2级cache的设计思路。
+  - L1 instruction and data TLBs（全相连）
+    - 48-entry fully-assocaitive L1 1-TLB
+    - 32-entry fully-associative L1 D-TLB
+  - L2 unified TLB.4-way set-associative of 1024-entry L2 TLB（组相连）
+
+![image-20251004145840476](running_linux_armv8.assets/image-20251004145840476.png)
+
+
+
+![image-20251004150436609](running_linux_armv8.assets/image-20251004150436609.png)
+
+### TLB的重名（别名）问题
+
+![image-20251004150808376](running_linux_armv8.assets/image-20251004150808376.png)
+
+虽然VP1和VP2在TLB里缓存了两个不同的TLB entry，但是TLB entry里的PFN都是指向Phys Page，所以，**不会产生别名问题**
+
+### TLB的同名问题
+
+![image-20251004151242782](running_linux_armv8.assets/image-20251004151242782.png)
+
+进程A切换到进程B，旧进程使用的TLB对新进程来说是无用数据，并且可能产生同名问题。如果直接在进程切换时invalidate TLB，那么性能上会有较大损失。解决方法就是使用**ASID（Address Space Identifier）**技术
+
+
+
+### ASID（Address Space Identifier）
+
+- **全局类型的TLB**：**内核空间是所有进程共享的空间**
+- **进程独有类型的TLB**：用户地址空间是每个进程独立的地址空间
+
+
+
+- ASID机制用来实现进程独有类型的TLB
+- ARMv8的ASID是存储在TTBR0_EL1或者TTBR1_EL1中。其中TCR寄存器的A1域可以做选择
+- ASID支持8位或者16位
+  - 8位宽的ASID，最多支持256个ID
+  - 16位宽的ASID，支持65536个ID
+
+![image-20251004151904797](running_linux_armv8.assets/image-20251004151904797.png)
+
+![image-20251004152114958](running_linux_armv8.assets/image-20251004152114958.png)
+
+**TCR_EL1** 中定义：
+
+![image-20251004153203095](running_linux_armv8.assets/image-20251004153203095.png)
+
+>  TLB可以识别哪个TLB entry属于哪个进程，这个是解决TLB同名问题的核心思想。这样进程切换时只需要刷掉被切换的进程的TLB entry
+
+操作系统常使用位图的方式管理ASID，一般不会用进程的PID
+
+
+
+
+
+![image-20251004153051610](running_linux_armv8.assets/image-20251004153051610.png)
+
+### Linux内核里的ASID
+
+- Linux内核里为每个进程分配两个ASID，即奇，偶数组成一对
+
+  - 当进程运行在用户态时，使用奇数ASID来查询TLB
+  - 当程序陷入内核态运行时，使用偶数ASID来查询TLB
+
+  > 为每个进程分配两个ASID主要是解决熔断漏洞问题
+
+- 硬件的ASID的分配通过位图来分配和管理
+
+- 进程切换的时候，需要把进程持有的硬件ASID写入到TTBR1_EL1寄存器里
+
+- 当系统中所有的硬件ASID加起来超过硬件最大值时会发生溢出，需要刷新全部TLB，然后重新分配硬件ASID
+
+![image-20251004154307791](running_linux_armv8.assets/image-20251004154307791.png)
+
+### 页表项中的nG属性
+
+![image-20251004154425362](running_linux_armv8.assets/image-20251004154425362.png)
+
+第11位nG:
+
+- 1：表示这个页面对应的TLB页表项是进程特有的
+
+- 0：表示是使用全局的TLB
+
+
+
+### TLBI指令
+
+- ARMv8提供了TLBI指令
+- 指令格式：
+
+```
+			TLBI <type><level>{IS} {,Xt}
+```
+
+- **Type**:
+  - **ALL**               整个TLB
+  - **VMALL**         所有的TLB entry（stage 1, for current guest OS）
+  - **VMALLS12**  所有的TLB entry（stage 1&2 for current guest OS）
+  - **ASID**             和ASID匹配的TLB entry，xt指定虚拟地址以及ASID
+  - **VA**                 虚拟地址指定的TLB entry，xt指定虚拟地址以及ASID
+  - **VAA**               虚拟地址指定的TLB entry，xt制定了虚拟地址但是不包括ASID
+- Level：En=异常等级（n可以是3，2，or 1）
+- IS：表示inner share
+- Xt：由虚拟地址和ASID组成的参数
+  - Bit[63:48]：ASID
+  - Bit[47:44]：TTL，用于指明使哪一级的页表保存的地址无效。若为0，表示需要使所有级别的页表无效（一般都设置为0）
+  - Bit[43:0] ：虚拟地址的Bit[55:12]
+
+
+
+
+
+![image-20251004155723202](running_linux_armv8.assets/image-20251004155723202.png)
+
+
+
+## 内存屏障指令
+
+ARMv8.6芯片手册
+
+- B2.3.7章Memory barriers
+- **Appendix K11 Barrier Litmus Tests**
+
+
+
+### 内存屏障产生的原因
+
+- 处理器采用超标量技术：乱序发射，乱序执行，提高指令并行进度
+
+![image-20251004160815828](running_linux_armv8.assets/image-20251004160815828.png)
+
+这两条语句先后顺序都有可能，因为没有依赖关系。
+
+- 内存一致性模型（memory consistency model）
+  - 原子一致性（atomic consistency）内存模型
+  - 顺序一致性（sequential consistency）内存模型
+  - 处理器一致性（processor consistency）内存模型
+  - 弱一致性（weak consistency）内存模型
+
+- 编译乱序
+
+### 弱一致性内存模型
+
+- 1986年，Dubois等发表的论文描述了弱一致性内存模型的定义
+  - 弱一致性内存模型要求同步访问（访问全局同步变量）是顺序一致的，在一个同步访问可以执行之前，之前的所有数据访问必须完成
+  - 在一个正常的数据访问可以执行之前，所有之前的同步访问必须完成
+  - 处理器使用内存屏障指令来实现整个同步访问的功能
+- 内存屏障指令的基本原则如下：
+  - **所有在内存屏障指令之前的数据访问必须在内存屏障指令之前完成**。
+  - **所有在内存屏障指令后面的数据访问必须等待内存屏障指令执行完**。
+  - **多条内存屏障指令是按顺序执行的**
+- 处理器会根据内存屏障的作用范围进行细分
+
+
+
+**例子**
+
+![image-20251004162428761](running_linux_armv8.assets/image-20251004162428761.png)
+
+会，因为CPU0可能会先执行b=1
+
+![image-20251004162704624](running_linux_armv8.assets/image-20251004162704624.png)
+
+### ARMv8的内存模型
+
+- 在**normal memory**实现的是**弱一致性的内存模型**（weak ordering model）
+- 在**device memory**实现的是**强一致性的内存模型**（strong ordering model）
+
+
+
+- 访存的序列可能和代码中的序列不一致
+- ARMv8架构支持预测式的访问（speculative accesses）
+  - 从内存中预取数据或者指令
+  - 分支预测（Branch prediction）
+  - 乱序的数据加载（Out of order data loads）
+  - 预测的cache line的填充（Speculative cache line fills）
+- **预测式的数据访问**只支持**normal memory**
+- **指令的预测预取可以支持任意内存类型**
+
+
+
+
+
+### 什么情况下，我们需要考虑内存屏障指令？
+
+- 在多个不同的CPU核心（线程）之间共享数据，例如mailbox等
+- 和外设共享数据，例如DMA操作
+- 修改内存管理的策略，例如上下文切换，请求缺页，修改页表
+- 修改存储指令的内存区域（instruction memory）:例如自修代码，加载一个程序到RAM
+
+
+
+### ARMv8提供的内存屏障指令
+
+- **数据存储**屏障( Data Memory Barrier, DMB )指令
+- **数据同步**屏障( Data Synchronization Barrier, DSB )指令
+- **指令同步**屏障( Instruction Synchronization Barrier, ISB )指令
+
+
+
+#### DMB指令
+
+- 仅仅影响数据访问（explicit data accesses，例如load和store）的**访问序列**
+- Data cache指令也算数据访问
+- 保证在**DMB之前的数据访问**可以被**DMB后面的数据访问指令**观察到
+
+
+
+**DMB**指令需要注意的地方
+
+- DMB指令关注的是**内存访问的序列**，不关心数据访问指令什么时候执行完成
+- DMB前面的数据访问指令必须要被DMB后面的数据访问指令观察到
+
+![image-20251004193451318](running_linux_armv8.assets/image-20251004193451318.png)
+
+- DMB前面的Data/unified cache指令必须在DMB后面的内存访问指令之前执行完成（观察到）
+
+![image-20251004193616124](running_linux_armv8.assets/image-20251004193616124.png)
+
+#### DSB指令
+
+- DSB指令比DMB指令严格很多
+- 在**DSB指令后面的任何指令**，必须等到如下完成了，**才能开始执行**：
+  - 在DSB指令前面的**所有数据访问**必须执行完成
+  - 在DSB指令之前的cache，branch predictor，TLB等指令必须执行完成
+
+
+
+**DSB指令需要注意的地方**
+
+- DMB指令**关注的仅仅是数据访问的序列**，而DSB指令**开始关注指令什么时候必须要执行完成**
+- 在DSB指令后面的指令，必须等到：
+  - DSB前面的所有数据访问指令都执行完成
+  - DSB前面所有的Cache，TLB等指令执行完成 
+
+> dsb指令更像是barrier
+
+![image-20251004194136890](running_linux_armv8.assets/image-20251004194136890.png)
+
+- 在一个多核系统中，cache和TLB指令会广播到其他core，所以DSB指令会等到这些指令广播并收到回复才算完成
+
+**dmb与dsb的区别**，例子：
+
+![image-20251004190159129](running_linux_armv8.assets/image-20251004190159129.png)
+
+![image-20251004190228657](running_linux_armv8.assets/image-20251004190228657.png)
+
+add指令不是数据访问指令
+
+#### DMB和DSB指令的参数
+
+- 可以指定两个维度的参数，一个是**Shareability domain**，另一个是**before-after**的访问
+- **Shareability domain**
+  - Full System
+  - Outer Shareable，前缀为**OSH**
+  - Inner Shareable，前缀为**ISH**
+  - Non-shareable，前缀为**NSH**
+- before-after的访问（即memory barrier指令的前后，进一步细化，读/写memory barrier）
+  - 读barrier：Load-Load/Store：后缀为**LD**
+  - 写barrier：Store-Store：后缀为**ST**
+  - 读写barrier：Any-Any：后缀为**SY**
+
+![image-20251004195324044](running_linux_armv8.assets/image-20251004195324044.png)
+
+
+
+#### DMB和DSB指令案例1：mailbox
+
+- 两个CPU通过mailbox来共享数据：共享内存和flags
+
+![image-20251004195553933](running_linux_armv8.assets/image-20251004195553933.png)
+
+#### DMB和DSB指令 案例2：DMA外设
+
+![image-20251004200758425](running_linux_armv8.assets/image-20251004200758425.png)
+
+DSB指令保证，DMA引擎在启动前看到了最新的数据已经在DMA buffer里。
+
+
+
+
+
+#### Cache维护指令的执行顺序
+
+- Cache维护指令例如dc和ic，它们的执行顺序和其他内存访问指令是一样的，没有特殊性
+- 指令单元（instruction interface）,数据单元（data interface）,MMU walker等可以看成是不同的观察者（observers）
+
+![image-20251004194515398](running_linux_armv8.assets/image-20251004194515398.png)
+
+解决办法：
+
+![image-20251004194537196](running_linux_armv8.assets/image-20251004194537196.png)
+
+
+
+#### 单方向（one way）的内存屏障
+
+- DMB和DSB都是双向的内存屏障指令，armv8支持“单方向”的内存屏障原语
+- **获取（acquire）原语**：指的是**该屏障原语之后的读写操作不能重排到该屏障原语前面**，通常该屏障原语**与加载指令结合**
+- **释放（release）原语**：指的是**该屏障原语之前的读写操作不能重排到该屏障原语后面**，通常该屏障原语**和存储指令结合**
+- **加载-获取（Load-Acquire）屏障原语**：普通的读和写操作可以向后越过该屏障指令，但是之后的读和写操作不能向前越过该屏障指令
+- ARMv8中的**ldar**指令
+
+![image-20251004201457954](running_linux_armv8.assets/image-20251004201457954.png)
+
+- **存储-释放（Store-Release）屏障原语**：普通的读和写可以向前越过存储-释放屏障指令，但是之前的读和写操作不能向后越过存储-释放屏障指令
+- ARMv8中的**stlr**指令
+
+![image-20251004201716825](running_linux_armv8.assets/image-20251004201716825.png)
+
+- **加载-获取**（**Load-Acquire**）以及**存储-释放**（**Store-Release**）通常需要配对使用
+- **ldar**和**stlr**配对使用：
+  - 用于保护一个临界区数据
+  - 在临界区的指令可以乱序（仅限临界区范围内）
+  - 比全功能的DMB指令性能要好
+
+![image-20251004202029957](running_linux_armv8.assets/image-20251004202029957.png)
+
+#### 指令级别的内存屏障指令：ISB指令
+
+- ISB指令威力巨大，它会**flush流水线**，然后**从指令cache或者内存中重新预取指令**。
+- ISB指令保证
+  - **ISB后面的指令都从指令cache或者内存中重新取址**
+  - ISB指令前面的更改上下文操作（contex-changing operation）都已经完成（这里的contex指的是系统寄存器状态等）
+
+
+
+- 更改上下文操作（contex-changing operation）包括：
+  - Cache，TLB和branch predictor等操作
+  - 改变系统寄存器，例如TTBR0
+
+
+
+- 更改上下文操作的效果：仅仅在**上下文同步事件**之后能看到
+- 上下文同步事件（**context synchronization event**）
+  - 发生一个异常（exception）
+  - 从一个异常返回
+  - ISB指令
+
+> 实际上修改系统寄存器后一般都需要isb指令，尤其是修改了系统控制寄存器，但例如PSTATE等系统寄存器则不需要
+
+#### ISB指令例子1：打开FPU
+
+![image-20251004203353662](running_linux_armv8.assets/image-20251004203353662.png)
