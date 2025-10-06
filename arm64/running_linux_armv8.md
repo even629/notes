@@ -6241,3 +6241,19 @@ ARMv8.6芯片手册与独占内存访问相关的内容
 - 第C3.2.13章 Compare and Swap
 - 第C3.2.13章 Atomic memory operations
 - 第C3.2.14章 Swap
+
+
+
+**为什么需要原子操作**
+
+thread_A_func和thread_B_func都尝试进行i++操作
+
+![image-20251006213216767](running_linux_armv8.assets/image-20251006213216767.png)
+
+### Linux内核中的基本原子操作函数
+
+![image-20251006220348956](running_linux_armv8.assets/image-20251006220348956.png)
+
+![image-20251006220403887](running_linux_armv8.assets/image-20251006220403887.png)
+
+如果CPU仅仅是从内存中读取（load）一个变量的值，或者仅仅是往内存中写（store）一个变量的值，都是不可打断的
