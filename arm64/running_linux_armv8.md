@@ -5996,3 +5996,248 @@ DSB指令保证，DMA引擎在启动前看到了最新的数据已经在DMA buff
 
 
 #### 再谈缓存一致性与内存屏障
+
+##### 问题的引入
+
+![image-20251006155515383](running_linux_armv8.assets/image-20251006155515383.png)
+
+下面的执行顺序
+
+![image-20251006155622589](running_linux_armv8.assets/image-20251006155622589.png)
+
+CPU1的断言仍然可能失败！！！
+
+##### 缓存一致性协议带来的CPU停滞现象
+
+- MESI协议是一种基于总线侦听和传输的协议，其总线传输带宽和CPU之间的负载以及CPU核数量有关系
+- 高速缓存行状态的变化严重依赖于其他告诉缓存行的应答信号，即必须受到其他所有CPU的高速缓存行的应答信号才能进行下一步的状态转换。在一个总线繁忙或者总线带宽紧张的场景下，CPU可能需要比较长的时间来等待其他CPU的应答引号，这会大大影响系统性能，这个现象称为CPU停滞（**CPU stall**）
+
+##### 例子分析：MESI协议带来的CPU停滞
+
+![image-20251006160211228](running_linux_armv8.assets/image-20251006160211228.png)
+
+在一个4核CPU系统中，数据A在CPU1，CPU2以及CPU3上共享，它们对应的高速缓存行的状态为S(共享)，A的初始值为0。而数据A在CPU0的高速缓存中没有缓存，其状态为I(无效)
+
+此时，CPU0往数据A中写入新值（例如写入1），那么这些高速缓存行的状态会如何发生变化呢？
+
+**T1时刻**
+
+![image-20251006160704605](running_linux_armv8.assets/image-20251006160704605.png)
+
+CPU0向总线发送一个本地写操作信号
+
+**T2时刻**
+
+CPU1，CPU2，CPU3都收到总线发来的BusRdX信号
+
+![image-20251006160748166](running_linux_armv8.assets/image-20251006160748166.png)
+
+**T3时刻**
+
+![image-20251006160859215](running_linux_armv8.assets/image-20251006160859215.png)
+
+CPU1检查自己本地高速缓存中是否有缓存数据A的副本。CPU1回复一个**Flushopt**信号并且把数据发送到总线上，然后把自己的高速缓存行状态设置为无效，状态变成I，最后广播应答信号。
+
+**T4时刻**
+
+![image-20251006161304857](running_linux_armv8.assets/image-20251006161304857.png)
+
+CPU2和CPU3都检查本地loacl cache，状态从S变成I
+
+**T5时刻**
+
+![image-20251006161411464](running_linux_armv8.assets/image-20251006161411464.png)
+
+CPU0接收其他所有CPU的应答信号，确认其他CPU上没有这个数据的缓存副本或者缓存副本已经被无效之后，才能修改数据A。最后，CPU0的高速缓存行状态变成M。
+
+
+
+**总结**
+
+CPU0有一个等待的过程，它需要等待其他所有CPU的应答信号
+
+![image-20251006161718946](running_linux_armv8.assets/image-20251006161718946.png)
+
+##### 优化办法1：存储缓冲区（Store Buffer）
+
+![image-20251006161859475](running_linux_armv8.assets/image-20251006161859475.png)
+
+- **不需要等待其他CPU的应答信号**，可以**先把数据写入到存储缓冲区中，继续执行下一条指令**
+- 当CPU0都收到了其他CPU都回复的应答信号之后，CPU0才从缓冲存储区中把数据A的最新值写入本地高速缓存行，并且修改高速缓存行的状态为M
+
+##### 存储缓冲区带来的副作用
+
+![image-20251006163432699](running_linux_armv8.assets/image-20251006163432699.png)
+
+![image-20251006163422204](running_linux_armv8.assets/image-20251006163422204.png)
+
+数据a在CPU1的高速缓存中有缓存副本，且状态为E
+
+数据b在CPU0的高速缓存里有缓存副本，且状态为E
+
+那么在带有缓冲区的系统中，会不会发生assert失败？
+
+
+
+**T1时刻** CPU0执行"a=1"的语句
+
+![image-20251006163829637](running_linux_armv8.assets/image-20251006163829637.png)
+
+**T2时刻** CPU0执行"b=1"的语句
+
+![image-20251006164103078](running_linux_armv8.assets/image-20251006164103078.png)
+
+**T3时刻**  CPU1执行"while(b==0)"的语句
+
+![image-20251006164219061](running_linux_armv8.assets/image-20251006164219061.png)
+
+**T4时刻** CPU0收到总线读信号。
+
+**T5时刻** CPU1获取了b的最新值
+
+![image-20251006164340856](running_linux_armv8.assets/image-20251006164340856.png)
+
+**T6时刻** assert失败
+
+![image-20251006164647519](running_linux_armv8.assets/image-20251006164647519.png)
+
+整个过程的流程图
+
+![image-20251006164756971](running_linux_armv8.assets/image-20251006164756971.png)
+
+##### 副作用解决办法：使用写内存屏障指令
+
+- **存储缓冲区**，优化了多核处理器之间长时间等待应答信号导致的性能下降。但是，依然**无法感知多核CPU之间是否存在数据依赖**
+- **写内存屏障语句**(例如smp_wmb())，把当前存储缓冲区中所有的数据都做一个标记，然后**flush存储缓冲区，保证之前写入到存储缓冲区的数据更新到高速缓存行，然后才能执行后面的写操作**
+
+![image-20251006192121598](running_linux_armv8.assets/image-20251006192121598.png)
+
+
+
+解决办法：加入写内存屏障语句：
+
+![image-20251006192224559](running_linux_armv8.assets/image-20251006192224559.png)
+
+
+
+**T1时刻 **CPU0执行"a=1"语句
+
+![image-20251006192545371](running_linux_armv8.assets/image-20251006192545371.png)
+
+**T2时刻** CPU0执行"smp_wmb()"
+
+![image-20251006192524086](running_linux_armv8.assets/image-20251006192524086.png)
+
+**T3时刻：CPU0执行"b=1"的语句**
+
+![image-20251006192651612](running_linux_armv8.assets/image-20251006192651612.png)
+
+**T4时刻** CPU1执行"while(b==0)"的语句
+
+![image-20251006192752855](running_linux_armv8.assets/image-20251006192752855.png)
+
+**T5时刻** 
+
+![image-20251006192836127](running_linux_armv8.assets/image-20251006192836127.png)
+
+CPU的数据b状态从E变为S
+
+**T6时刻**
+
+![image-20251006193006850](running_linux_armv8.assets/image-20251006193006850.png)
+
+**T7时刻**
+
+![image-20251006193111113](running_linux_armv8.assets/image-20251006193111113.png)
+
+
+
+**T8时刻**
+
+CPU0收到关于数据a的回应信号。把存储缓冲区的数据a写入高速缓存中。
+
+![image-20251006193205282](running_linux_armv8.assets/image-20251006193205282.png)
+
+**T9时刻**
+
+在存储缓冲区的数据项b也写入高速缓存中
+
+![image-20251006193435407](running_linux_armv8.assets/image-20251006193435407.png)
+
+**T10时刻**
+
+![image-20251006193549367](running_linux_armv8.assets/image-20251006193549367.png)
+
+**T11时刻**
+
+![image-20251006193626914](running_linux_armv8.assets/image-20251006193626914.png)
+
+**T12时刻**
+
+![image-20251006193658278](running_linux_armv8.assets/image-20251006193658278.png)
+
+因为a=1和b=1之间加入了smp_wmb()指令，因此b=1的写入高速缓存的操作必须在a=1写入高速缓存后才能执行
+
+##### 优化办法2：无效队列（Invalidate Queue）
+
+- 优化方法1中的存储缓冲区很小，容易填满
+- CPU停滞的一个原因是：**等待其他CPU做"使无效"的操作(invalidate)而且比较耗时**
+- 无效队列：**把"使无效操作"缓存起来，先给请求者回复一个应答信号，然后再慢慢做无效操作**，这样其他CPU就不必长时间等待了
+
+> 回复无效操作的CPU本身也不需要这个数据
+
+
+
+- 当CPU收到总线请求之后，如果需要执行无效本地高速缓存行的操作，那么会把这个请求加入到无效队列里，然后立马给对方回复一个应答信号，而无需把该高速缓存行无效之后再应答
+- 如果CPU将某个请求加入到无效队列，那么在该请求对应的无效操作完成之前，那么CPU不能向总线发送任何与该请求对应的高速缓存行相关的总线消息。
+
+![image-20251006194256513](running_linux_armv8.assets/image-20251006194256513.png)
+
+##### 无效队列的副作用
+
+![image-20251006194701402](running_linux_armv8.assets/image-20251006194701402.png)
+
+假设数据a和数据b的初始值为0，数据a在CPU0和CPU1都有副本，状态为S，数据b在CPU0上有缓存副本，状态为E，那么assert会成功吗？
+
+![image-20251006202512309](running_linux_armv8.assets/image-20251006202512309.png)
+
+![image-20251006202710737](running_linux_armv8.assets/image-20251006202710737.png)
+
+##### 副作用解决办法：使用读内存屏障指令
+
+**读内存屏障指令**: 读内存屏障指令可以**让无效队列里所有的无效操作都执行完成才能执行该读屏障指令后面的读操作**。
+
+![image-20251006203308631](running_linux_armv8.assets/image-20251006203308631.png)
+
+##### 内存屏障与缓存一致性的总结
+
+- 在SMP中，一条简单的load和store指令不简单，它的行为需要与MESI缓存一致性协议结合来分析
+- 内存屏障需要和MESI缓存一致性来结合分析
+- 存储缓冲区和无效队列是一种硬件优化手段，但是也带来一些副作用
+
+
+
+- 读内存屏障指令作用于无效队列，让无效队列中积压的无效操作尽快执行完成才能执行后面的读操作
+- 写内存屏障指令作用域存储缓冲区，让存储缓冲区中数据写入到高速缓存之后才能执行后面的写操作
+
+##### Linux内核中提供的内存屏障API
+
+Linux内核抽象出一种最小的共同性，在这个集合里，每种处理器体系结构都能支持
+
+![image-20251006204554855](running_linux_armv8.assets/image-20251006204554855.png)
+
+#### ARM64内存屏障指令的深入理解
+
+![image-20251006204950485](running_linux_armv8.assets/image-20251006204950485.png)
+
+
+
+## 原子操作
+
+ARMv8.6芯片手册与独占内存访问相关的内容
+
+- 第B2.9章 Synchronization and semaphores
+- 第D1.16章节 Mechanisms for entering a low-power state
+- 第C3.2.13章 Compare and Swap
+- 第C3.2.13章 Atomic memory operations
+- 第C3.2.14章 Swap
