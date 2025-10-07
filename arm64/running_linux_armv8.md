@@ -6252,8 +6252,545 @@ thread_A_func和thread_B_func都尝试进行i++操作
 
 ### Linux内核中的基本原子操作函数
 
+- Linux内核提供了atomic_t类型的原子变量，它的实现依赖于不同的架构
+- atomic_t类型的原子操作函数可以保证了一个操作的原子性和完整性
+- "读-修改-回写"机制
+  - 在读取原子变量的值到通用寄存器
+  - 在通用寄存器里修改原子变量的值
+  - 把新值写回内存中
+
+![image-20251007132429991](running_linux_armv8.assets/image-20251007132429991.png)
+
 ![image-20251006220348956](running_linux_armv8.assets/image-20251006220348956.png)
 
 ![image-20251006220403887](running_linux_armv8.assets/image-20251006220403887.png)
 
 如果CPU仅仅是从内存中读取（load）一个变量的值，或者仅仅是往内存中写（store）一个变量的值，都是不可打断的
+
+下面的这些操作函数API用到了"读-修改-回写"机制
+
+![image-20251007132608276](running_linux_armv8.assets/image-20251007132608276.png)
+
+
+
+![image-20251007132600688](running_linux_armv8.assets/image-20251007132600688.png)
+
+![image-20251007132753381](running_linux_armv8.assets/image-20251007132753381.png)
+
+### ARMv8对原子操作的支持
+
+- ARMv8提供两种方式的原子操作
+  - 传统的Load-exclusive和store-exclusive方式
+    - 在ARMv8上都支持
+    - LL/SC(Load-link/store-conditional)
+  - LSE（Large System Extensions）支持原子操作指令
+    - 在ARMv8.1上开始支持，ARMv8.1-LSE
+    - 新增Compare and Swap instructions
+    - 新增Atomic memory operation instructions
+    - 新增Swap instruction
+
+![image-20251007133212590](running_linux_armv8.assets/image-20251007133212590.png)
+
+#### Load-exclusive和store-exclusive指令
+
+- **ldxr**指令：内存独占加载指令。从内存中以独占的方式加载内存地址的值到通用寄存器里
+
+```asm
+    ldxr <xt> , [xn|sp]
+```
+
+- **stxr**指令：内存独占存储指令。以独占的方式把新的数据存储到内存中。
+
+```asm
+    stxr <ws> , <xt> , [xn|sp]
+```
+
+- Load/Store Exclusive Pair指令
+
+```asm
+	ldxp <Xt1>, <Xt2>, [Xn|SP]
+	stxp <Ws>, <Xt1>, <Xt2>, [<Xn|SP>]
+```
+
+- 带acquire和release原语的Load/Store Exclusive指令
+
+**例子**
+
+- 通过独占监视器（exclusive monitor）来监视这个内存的访问，独占监视器会把这个内存地址标记为独占访问模式，保证以独占的方式来访问这个内存地址，不受其他因素的影响
+
+![image-20251007134037530](running_linux_armv8.assets/image-20251007134037530.png)	
+
+##### 独占监视器（Exclusive Monitor）
+
+- 独占监视器一共有两个状态：
+  - 开放访问状态（Open Access state）
+  - 独占访问状态（Exclusive Access state）
+- ldxr指令从内存加载数据时，CPU会把这个内存地址标记为独占访问状态
+- 当CPU执行stxr指令时，需要根据独占监视器的状态来做决定
+  - 如果独占监视器的状态为独占访问状态，那么stxr指令存储成功，stxr指令返回0，独占监视器的状态变成了开放访问状态
+  - 如果独占监视器的状态为开放访问状态，那么stxr存储失败，stxr返回1
+
+![image-20251007134928200](running_linux_armv8.assets/image-20251007134928200.png)
+
+**注意事项**
+
+- 独占监视器本身不是用来阻止CPU核心来访问被标记的内存，不会lock总线
+- 独占监视器仅仅是起到监视的作用，监视状态的变化
+- 不能把独占监视器看成是一个硬件的锁
+
+![image-20251007135241481](running_linux_armv8.assets/image-20251007135241481.png)
+
+##### 独占监视器的组成架构
+
+- 通常一个系统由多级独占监视器组成（由芯片设计时定义）
+  - 本地独占监视器（Local monitor）,**适用于非共享（Non-shareable）的内存**
+  - 缓存一致性的全局独占监视器（Internal coherent global monitor），**适用于普通类型的内存**
+  - 外部的全局独占监视器（External global monitor），**适用于设备类型的内存**
+- 有的Soc不支持外部的全局独占监视器。例如树莓派4b上使用的BMC2711
+- 在MMU没有是能的情况下，我们访问物理内存变成了访问设备类型的内存，此时使用ldxr和stxr指令会产生不可预测的错误
+
+![image-20251007135959394](running_linux_armv8.assets/image-20251007135959394.png)
+
+- ldxr指令的使用会有很多限制，要求memory是normal memory且是shareable
+- 如果访问device memory，例如MMU没有打开的情况，那就需要CPU IP核心支持以独占方式访问device memory，这个需要查询具体CPU ID手册的描述
+
+##### 独占监视器的粒度（Granularity of Exclusive Monitor）
+
+- CTR_EL1寄存器中的ERG（Exclusives Reservation Granule）定义了独占监视器的最小单位
+- ERG可以定义的范围是4 words~512words，不过通常是一个cache line的大小
+- 举例：
+  - 假设ERG是2^4，即16字节。当使用ldrxb指令对0x341B4地址进行独占地读操作，那么从0x341b0~0x341bf都会标记为exclusive access
+
+##### 案例1：atomic_add()函数的实现
+
+![image-20251007140733624](running_linux_armv8.assets/image-20251007140733624.png)
+
+##### 案例2：简单锁（spinlock）的实现
+
+![image-20251007140815931](running_linux_armv8.assets/image-20251007140815931.png)
+
+cbnz w2, retry
+
+
+
+**多核情况下的ldxr和stxr分析**
+
+CPU0和CPU1同时执行get_lock()操作
+
+![image-20251007141358711](running_linux_armv8.assets/image-20251007141358711.png)
+
+**T0时刻** 初始化状态
+
+![image-20251007142213872](running_linux_armv8.assets/image-20251007142213872.png)
+
+**T1和T2时刻** CPU0执行ldxr指令
+
+![image-20251007142315405](running_linux_armv8.assets/image-20251007142315405.png)
+
+**T3时刻** CPU1执行ldxr指令
+
+![image-20251007142404923](running_linux_armv8.assets/image-20251007142404923.png)
+
+**T4时刻** CPU0通过stxr指令来获取了锁
+
+![image-20251007142502721](running_linux_armv8.assets/image-20251007142502721.png)
+
+**T5时刻** CPU1通过stxr指令尝试获取锁
+
+![image-20251007142551874](running_linux_armv8.assets/image-20251007142551874.png)
+
+##### WFE指令在锁实现中的应用
+
+- 如果CPU0获取了锁，CPUn在等待锁的时候，让CPU进入低功耗模式，那么能节省功耗和提升性能
+- 获取锁的示例代码
+
+![image-20251007142908368](running_linux_armv8.assets/image-20251007142908368.png)
+
+- 释放锁的示例代码
+
+![image-20251007142935905](running_linux_armv8.assets/image-20251007142935905.png)
+
+
+
+ **使用 LDXR/STXR 实现原子自增（无序）**
+
+```
+loop:
+    ldxr    w0, [addr]     // 加载值（不带内存屏障）
+    add     w0, w0, #1
+    stxr    w1, w0, [addr] // 试图写回
+    cbnz    w1, loop       // 如果失败重试
+```
+
+> 这种写法是 **无序的**，适合数据原子更新但不涉及线程同步。
+
+------
+
+**例2：使用 LDAXR/STLXR 实现锁（有序）**
+
+```
+// try_lock
+loop:
+    ldaxr   w0, [lock]     // 加载锁值（acquire）
+    cbnz    w0, loop       // 如果锁已被持有则重试
+    mov     w0, #1
+    stlxr   w1, w0, [lock] // 尝试设置锁（release）
+    cbnz    w1, loop       // 如果失败重试
+```
+
+> 这种写法是**有序的**，保证：
+>
+> - 获取锁前的操作不会越过锁；
+> - 释放锁后的操作不会被提前执行。
+
+
+
+##### WFE唤醒
+
+- 通过WFE睡眠的CPU，下面方式唤醒
+  - unmasked interrupt
+  - Event（唤醒事情）
+- 触发唤醒事件的方式：
+  - 执行了sev指令
+  - 本地CPU执行了sevl指令
+  - clear独占监视器，从独占状态变成开放状态
+- 当持有锁的CPU通过stlr指令写入lock区域释放锁的时候，会触发一个唤醒事件，正在睡眠等待的spinlock的CPU会被唤醒
+
+![image-20251007144352515](running_linux_armv8.assets/image-20251007144352515.png)
+
+
+
+#### 原子内存访问操作（Atomic Memory Access）
+
+- ARMv8.1 上支持下面三种原子内存访问操作（Large System Extensions）
+  - Compare and Swwap instructions, CAS and CASP
+  - Atomic memory operation instructions
+  - Swap instruction
+- 通过ID_AA64ISAR0_EL1寄存器中的atomic域来判断是否支持LSE
+
+![image-20251007144715445](running_linux_armv8.assets/image-20251007144715445.png)
+
+##### 比较并交换（Compare and Swap）指令
+
+- 比较并交换指令：检查ptr指向的值与expected是否相等。若相等，则把new的值赋给ptr；否则什么也不做。不管是相等，最终都会返回ptr的旧值
+
+![image-20251007144906260](running_linux_armv8.assets/image-20251007144906260.png)
+
+- ARMv8.1上的**CAS指令**
+
+```asm
+		CAS <Xs>, <Xt>, [Xn|SP]
+```
+
+如果Xn的值（Xn是一个地址）==Xs，那么把Xt的值存储在Xn，返回值为Xs，等于Xn的旧值
+
+![image-20251007145315937](running_linux_armv8.assets/image-20251007145315937.png)
+
+
+
+##### CAS指令在Linux内核中的使用
+
+- cmpxchg函数原型
+
+> cmpxchg原子地比较ptr地值是否与old的值相等，若相等，则把new的值设置到ptr地址中，返回old的值
+
+![image-20251007145522959](running_linux_armv8.assets/image-20251007145522959.png)
+
+`mov x30, %x[old]`
+
+- 将 **期望值** `old` 复制到寄存器 `x30`
+- `x30` 作为 CASAL 指令的比较寄存器
+
+ `casal x30, %x[new], %[v]`
+
+- 执行 **CASAL 指令**
+
+- 参数：
+
+  - `x30`：存储旧值，比较使用
+  - `%x[new]`（x2）：新值
+  - `%[v]`（*ptr）：内存地址
+
+- 功能：
+
+  1. 比较内存中的值与 `x30`（old）
+  2. 如果相等，写入 `%x[new]`到内存地址v
+  3. 如果不等，`x30` 被更新为当前内存值
+
+- **原子性 + Acquire-Release 内存序语义**, 形成了一个**双向内存屏障（Full fence）**：
+
+  ```
+      [前面的写]  ----必须在----> CASAL ----必须在----> [后面的读写]
+  ```
+
+>  **CASAL 会在比较成功时把新值写入 `[x0]`（即内存地址 \*ptr）**，比较失败则返回内存中的旧值到寄存器 `x30`
+
+ `mov %x[ret], x30`
+
+- 将操作后的值写回返回值寄存器 `[ret]`（绑定在 x0）
+- 返回的值可以告诉调用者：CAS 成功或失败
+
+
+
+##### 原子内存操作指令
+
+- 原子加载指令（Atomic loads）
+
+```asm
+	LD<OP> <Xs>, <Xt>,[<Xn|SP>]
+```
+
+相当于
+
+```c
+tmp = *Xn;
+*Xn = *Xn <OP> Xs;
+Xt = tmp;
+```
+
+##### 原子存储指令
+
+```asm
+	ST<OP> <Xs>,[<Xn|SP>]
+```
+
+相当于
+
+```c
+*Xn = *Xn <OP> Xs;
+```
+
+- OP
+
+| OP 操作 | 描述                       |
+| ------- | -------------------------- |
+| ADD     | 原子加法                   |
+| CLR     | 原子的比特位清除           |
+| SET     | 原子的比特位置位           |
+| EOR     | 原子的异或操作             |
+| SMAX    | 原子的有符号数的最大值     |
+| SMIX    | 原子的有符号数的最小值操作 |
+| UMAX    | 原子的无符号数的最大值     |
+| UMIX    | 原子的无符号数的最小值操作 |
+
+##### 举例：使用ldumax指令实现简单的spinlock
+
+![image-20251007152429280](running_linux_armv8.assets/image-20251007152429280.png)
+
+##### 原子交换指令
+
+```asm
+	swp <Xs>, <Xt>, [<Xn|SP>]
+```
+
+相当于
+
+```asm
+tmp = *Xn;
+*Xn = Xs;
+Xt = tmp;
+```
+
+## 浮点运算
+
+### 浮点运算PF和NEON指令
+
+- VFP发展历史
+- VFPv1：早期版本
+- VFPv2：ARMv5和ARMv6处理器中的VFP协作处理器
+- VFPv3：ARMv7处理器
+- VFPv4：ARMv7处理器
+- NEON：支持SIMD指令和浮点运算指令
+
+
+
+### **矢量（向量）寄存器与通道**
+
+![image-20251007161215840](running_linux_armv8.assets/image-20251007161215840.png)
+
+- 矢量被划分为多个通道（lanes），每个通道包含一个矢量元素（vector elements）
+
+![image-20251007161442426](running_linux_armv8.assets/image-20251007161442426.png)
+
+- 通道数据类型：
+  - Vn：128位的数据类型
+  - Dn：64位的数据类型
+  - Sn：32位的数据类型
+  - Hn：16位的数据类型
+  - Bn：8位的数据类型
+
+![image-20251007161621921](running_linux_armv8.assets/image-20251007161621921.png)
+
+![image-20251007164014259](running_linux_armv8.assets/image-20251007164014259.png)
+
+| 矢量组表示方法 | 含义                                                         |
+| -------------- | ------------------------------------------------------------ |
+| Vn.8B          | 8 bits × 8 lanes，表示 8 个数据通道，每个数据元素为 8 位数据。 |
+| Vn.4H          | 16 bits × 4 lanes，表示 4 个数据通道，每个数据元素为 16 位数据。 |
+| Vn.2S          | 32 bits × 2 lanes，表示 2 个数据通道，每个数据元素为 32 位数据。 |
+| Vn.1D          | 64 bits × 2 lane，表示 2 个数据通道，每个数据元素为 64 位数据。 |
+| Vn.16B         | 8 bits × 16 lanes，表示 16 个数据通道，每个数据元素为 8 位数据。 |
+| Vn.4S          | 32 bits × 4 lanes，表示 4 个数据通道，每个数据元素为 32 位数据。 |
+| Vn.2D          | 64 bits × 2 lane，表示 2 个数据通道，每个数据元素为 64 位数据。 |
+
+
+
+- 索引某个通道的值
+
+  - 例如“V0.S[1]”表示V0矢量组中的第1个32位的数据，即Bit[63:32]
+
+- 矢量寄存器列表（vector register list）
+
+  ![image-20251007164325457](running_linux_armv8.assets/image-20251007164325457.png)
+
+- 索引矢量寄存器列表某个通道的值
+
+  ![image-20251007164409071](running_linux_armv8.assets/image-20251007164409071.png)
+
+### 浮点数
+
+- ARMv8支持IEEE 754标准
+- ARM64处理器支持单精度和双精度浮点数。在ARM64处理器中，单精度浮点数采用32位Sn寄存器来表示，双精度浮点数采用64位Dn寄存器来表示
+- 在C语言中可以使用float类型来表示单精度浮点数，double类型来表示双精度浮点数
+- 浮点数由三部分组成：符号位S，阶码和尾数
+  - 符号位为0表示正数，为1表示负数
+  - 阶码有一个固定的偏移量127
+  - 单精度浮点数使用32位空间来表示，其中阶码8位，位数24位
+  - 双精度浮点数使用64位空间来表示，其中阶码11位，尾数53位
+
+![image-20251007164914432](running_linux_armv8.assets/image-20251007164914432.png)
+
+### 浮点数二进制表示
+
+- 把十进制数(5.25)转换为单精度的浮点数，那么它的二进制存储格式是多少
+
+- 步骤
+
+  1. 把十进制数转换成二进制数：整数部分直接转换成二进制数，小数部分乘2取整
+
+  > 整数部分直接把5转成二进制，变成了二进制数:101
+  >
+  > 小数部分则需要将十进制小数部分乘2，所得积的小数点左边的数字(0或1)作为二进制表示法中的数字，直到满足精确度位置
+  >
+  > 0.25 * 2 = 0.5 小数点左边为0
+  >
+  > 0.5 * 2 = 1.0 小数点左边为1
+  >
+  > 十进制数（5.25）转成二进制数位101.01
+
+  2. 规格化二进制数，改变阶码，使小数点前面只有第一位有效数字
+
+  > 二进制数位（101.01）规格化之后变成：1.0101*2^2，其中尾数为0101，阶码为2
+
+  3. 计算阶码。对于单精度浮点数需要加上7F（127）的偏移量，对于双精度浮点数需要加上3FF（1023）的偏移量。
+
+  > 本例子中最终的阶码位129
+
+  4. 把数字符号位，阶码和尾数合起来就得到浮点数存储形式
+
+  > 本例子中，符号位为0，阶码为：1000 0001，尾数为：0101，用16进制来表示为：0x40a80000
+
+### 实验一：浮点数二进制表示法
+
+![image-20251007155803709](running_linux_armv8.assets/image-20251007155803709.png)
+
+### fmov指令
+
+fmov指令支持的浮点常量
+
+![image-20251007155731740](running_linux_armv8.assets/image-20251007155731740.png)
+
+
+
+### FPCR寄存器
+
+![image-20251007155958216](running_linux_armv8.assets/image-20251007155958216.png)
+
+### 架构特性访问控制寄存器CPACR_EL1
+
+有一对PF/NEON寄存器是否会陷入到EL1的控制字段：**FPEN**
+
+- 当FPEN为0b01，表示在EL0里访问SVE，高级SIMD以及浮点单元寄存器时会陷入到EL1中处理，异常类型代码为0x7
+- 当FPEN为0b00或者ob10，表示在EL0或者EL1里访问SVE，高级SIMD以及浮点单元寄存器时会陷入到EL1中处理，异常类型代码为0x7
+- 当FPEN为0b11，表示不会陷入到EL1中
+
+### 浮点数的条件操作码
+
+![image-20251007160507043](running_linux_armv8.assets/image-20251007160507043.png)
+
+### 常用的浮点数指令
+
+- 指令以F字母开头，大概几十条指令
+- 见ARMv8.6手册第C.2章
+- 见<<ARM Compiler arm asm User Guide,v6.6>>第18-20章
+
+![image-20251007160745782](running_linux_armv8.assets/image-20251007160745782.png)
+
+## Neon指令优化
+
+### SISD和SIMD
+
+- SISD（Single Instruction Single Data）指的是**单指令单数据**。**每条指令在单个数据源上执行其指定的操作**
+
+```asm
+ADD w0, w0, w5
+ADD w1, w1, w6
+ADD w2, w2, w7
+ADD w3, w3, w8
+```
+
+- SIMD指的是**单指令多数据流**，它**对多个数据元素同时执行相同的操作**。这些数据元素被打包成一个更大的寄存器中的独立通道（lanes）
+
+![image-20251007173135077](running_linux_armv8.assets/image-20251007173135077.png)
+
+
+
+
+
+- SIMD指的是单指令多数据流，它对多个数据元素同时执行相同的操作。这些数据元素被打包成一个更大的寄存器中的独立通道（Lanes）
+
+![image-20251007175141676](running_linux_armv8.assets/image-20251007175141676.png)
+
+
+
+### LD1指令
+
+- LD1指令是用来把多个元素加载到一个，两个，三个或四个矢量寄存器中。
+
+- LD1指令支持**没有偏移**和**后变基**两种模式
+
+  - 没有偏移的模式
+
+  ```asm
+  LD1 {<Vt>.<T> }, [<Xn|SP>]
+  LD1 {<Vt>.<T>, <Vt2>.<T>}, [<Xn|SP>]
+  LD1 {<Vt>.<T>, <Vt2>.<T>, <Vt3>.<T>}, [<Xn|SP>]
+  LD1 {<Vt>.<T>, <Vt2>.<T>, <Vt3>.<T>, <Vt4>.<T>}, [<Xn|SP>]
+  ```
+
+  ![image-20251007175800883](running_linux_armv8.assets/image-20251007175800883.png)
+
+  - 后变基模式
+
+  ```asm
+  LD1 {<Vt>.<T> }, [<Xn|SP>], <imm>
+  LD1 {<Vt>.<T>, <Vt2>.<T>}, [<Xn|SP>], <imm>
+  LD1 {<Vt>.<T>, <Vt2>.<T>, <Vt3>.<T>}, [<Xn|SP>], <imm>
+  LD1 {<Vt>.<T>, <Vt2>.<T>, <Vt3>.<T>, <Vt4>.<T>}, [<Xn|SP>], <imm>
+  ```
+
+
+
+### 例子1：LD1指令加载RGB24
+
+- 以RGB24图像格式为例，一个像素用24位（3个字节）表示R（红），G（绿），B（蓝）三种颜色。它们在内存中的存储格式是R0, G0, B0, R1, G1, B1以此类推
+
+![image-20251007180328781](running_linux_armv8.assets/image-20251007180328781.png)
+
+- 使用LD1指令来把RGB24格式的数据加载到矢量寄存器
+
+```asm
+LD1 {V0.16B, V1.16B, V2.16B}, [x0]
+```
+
+![image-20251007180340671](running_linux_armv8.assets/image-20251007180340671.png)
