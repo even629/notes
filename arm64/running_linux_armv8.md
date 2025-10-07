@@ -6794,3 +6794,86 @@ LD1 {V0.16B, V1.16B, V2.16B}, [x0]
 ```
 
 ![image-20251007180340671](running_linux_armv8.assets/image-20251007180340671.png)
+
+### ST1指令
+
+- ST1指令是把一个，两个，三个或四个矢量寄存器的多个数据元素的内容存储到内存中
+
+- ST1指令支持没有偏移和后变基模式
+
+  - 没有偏移的模式：
+
+  ```asm
+  ST1 {<Vt>.<T>}, [<Xn|SP>]
+  ST1 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>]
+  ST1 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>},[<Xn|SP>]
+  ST1 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>]
+  ```
+
+  - 后变基模式：
+
+  ```asm
+  ST1 {<Vt>.<T>}, [<Xn|SP>], <imm>
+  ST1 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>], <imm>
+  ST1 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>},[<Xn|SP>], <imm>
+  ST1 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
+  ```
+
+### 例子：ST1指令存储RGB24
+
+- V0, V1和V3矢量寄存器中存储了RGB24格式的数据，通过ST1指令来把数据存储到内存中
+
+```asm
+ST1 {V0.16B, V1.16B, V2.16B}, {x0}
+```
+
+![image-20251007203102132](running_linux_armv8.assets/image-20251007203102132.png)
+
+###   实验2：LD1和ST1指令的使用
+
+![image-20251007203200419](running_linux_armv8.assets/image-20251007203200419.png)
+
+![image-20251007224637823](running_linux_armv8.assets/image-20251007224637823.png)
+
+### LD2/ST2：交替（interleave）方式加载和存储
+
+- LD2和ST2指令就是支持交替方式来加载和存储数据
+
+- 支持没有偏移和后变基两种模式
+
+  ```asm
+  LD2 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>]
+  ST2 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>]
+  
+  LD2 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>], <imm>
+  ST2 {<Vt>.<T>,<Vt2>.<T>},[<Xn|SP>], <imm>
+  ```
+
+- 例子
+
+```asm
+LD2 {V0.8H, V1.8H}, [x0]
+```
+
+![image-20251007225040251](running_linux_armv8.assets/image-20251007225040251.png)
+
+### 实验3：LD2和ST2指令的使用
+
+![image-20251007225202819](running_linux_armv8.assets/image-20251007225202819.png)
+
+### LD3/ST3：三通道交替（interleave）
+
+- 在RGB24转BGR24中，如果我们使用LD1指令来加载RGB24数据到矢量寄存器，那么需要在不同的通道中获得不同的颜色组件，然后移动这些组件并重新组合，这样效率会很低
+- LD3和ST3指令就是支持交替方式来加载和存储数据
+- 支持没有偏移和后变基两种模式
+
+```asm
+LD3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>]
+ST3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>]
+
+LD3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
+ST3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
+```
+
+### 例子：LD1指令加载RGB24
+
