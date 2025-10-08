@@ -6619,6 +6619,14 @@ Xt = tmp;
   - Hn：16位的数据类型
   - Bn：8位的数据类型
 
+| 名称   | 位宽    | 对应的V寄存器范围 | 说明                               |
+| ------ | ------- | ----------------- | ---------------------------------- |
+| **Vn** | 128 bit | V0–V31            | NEON 128 位寄存器（完整向量）      |
+| **Dn** | 64 bit  | D0–D31            | Vn 的低 64 位（Double precision）  |
+| **Sn** | 32 bit  | S0–S31            | Dn 的低 32 位（Single precision）  |
+| **Hn** | 16 bit  | H0–H31            | S 寄存器再下一级（Half precision） |
+| **Bn** | 8 bit   | B0–B31            | 最低的 8 位（Byte）                |
+
 ![image-20251007161621921](running_linux_armv8.assets/image-20251007161621921.png)
 
 ![image-20251007164014259](running_linux_armv8.assets/image-20251007164014259.png)
@@ -6628,7 +6636,7 @@ Xt = tmp;
 | Vn.8B          | 8 bits × 8 lanes，表示 8 个数据通道，每个数据元素为 8 位数据。 |
 | Vn.4H          | 16 bits × 4 lanes，表示 4 个数据通道，每个数据元素为 16 位数据。 |
 | Vn.2S          | 32 bits × 2 lanes，表示 2 个数据通道，每个数据元素为 32 位数据。 |
-| Vn.1D          | 64 bits × 2 lane，表示 2 个数据通道，每个数据元素为 64 位数据。 |
+| Vn.2D          | 64 bits × 2 lane，表示 2 个数据通道，每个数据元素为 64 位数据。 |
 | Vn.16B         | 8 bits × 16 lanes，表示 16 个数据通道，每个数据元素为 8 位数据。 |
 | Vn.4S          | 32 bits × 4 lanes，表示 4 个数据通道，每个数据元素为 32 位数据。 |
 | Vn.2D          | 64 bits × 2 lane，表示 2 个数据通道，每个数据元素为 64 位数据。 |
@@ -6875,5 +6883,773 @@ LD3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
 ST3 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
 ```
 
-### 例子：LD1指令加载RGB24
+### 例子：RGB24转BGR24
 
+- 使用LD3指令来吧RGB24格式的数据加载到矢量寄存器中
+
+```asm
+	LD3 {V0.16B, V1.16B, V2.16B}, [x0]
+```
+
+![image-20251008112736296](running_linux_armv8.assets/image-20251008112736296.png)
+
+![image-20251008112854532](running_linux_armv8.assets/image-20251008112854532.png)
+
+**存储RGB24到内存**
+
+![image-20251008113028621](running_linux_armv8.assets/image-20251008113028621.png)
+
+### 实验4：使用LD3/ST3来实现RGB24转BGR24
+
+![image-20251008113230421](running_linux_armv8.assets/image-20251008113230421.png)
+
+C语言实现
+
+![image-20251008124144182](running_linux_armv8.assets/image-20251008124144182.png)
+
+汇编实现
+
+![image-20251008124417311](running_linux_armv8.assets/image-20251008124417311.png)
+
+### LD4/ST4：四通道交替（interleave）
+
+- ARGB图像是RGB基础上加了Alpha（透明度）通道，为了加快ARGB格式的数据加载和存储操作，NEON指令提供了LD4和ST4指令。LD4与LD3类似，不过它可以把数据解交叉地加载到4个矢量寄存器中
+- LD4和ST4指令就是支持交替地方式来加载和存储数据
+- 支持没有偏移和后变基两种模式
+
+```asm
+LD4 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>]
+ST4 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>]
+
+LD4 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
+ST4 {<Vt>.<T>,<Vt2>.<T>,<Vt3>.<T>,<Vt4>.<T>},[<Xn|SP>], <imm>
+```
+
+
+
+### LDnR指令
+
+- LDn指令还有一个指令变种LDnR指令，R表示替代地意思。它会从内存中加载一组数据元素，然后把数据复制到矢量寄存器地所有通道中
+- 例子：
+
+```asm
+LD3R {V0.16B, V1.16B, V2.16B}, [x0]
+```
+
+![image-20251008125250652](running_linux_armv8.assets/image-20251008125250652.png)
+
+### 读写某个通道的值
+
+- LDn指令可以加载数据到矢量寄存器的某个通道中，而其他通道的值不变
+- 例子：
+
+```asm
+		LD3 {V0.B, V1.B, V2.B}[4], [x0]
+```
+
+![image-20251008125446026](running_linux_armv8.assets/image-20251008125446026.png)
+
+### MOV指令
+
+- **从通用寄存器中搬移数据**
+
+```asm
+mov w1, #0xa
+mov v1.h[2], w1
+```
+
+- **矢量寄存器搬移**
+
+```asm
+MOV V3.16B, V0.16B
+MOV V3.8B,  V0.8B
+```
+
+- **搬移数据元素到矢量寄存器**
+
+```asm
+mov h2, v1.8h[2]
+```
+
+- **搬移数据元素**
+
+```asm
+mov v1.8h[2], v0.8h[2]
+```
+
+### MOVI
+
+**`movi`** 是 ARMv8（AArch64）体系结构中 **NEON（Advanced SIMD）** 的一条向量立即数加载指令。
+ 它的全称是 **“Move Immediate (vector)”**。
+
+`movi` 用于：
+
+> 把一个**立即数（immediate）** 装载到一个 **SIMD/浮点寄存器（Vn 或 Qn）** 中。
+
+它可以一次性填充寄存器中的所有元素，常用于初始化向量寄存器。
+
+**语法格式**
+
+有几种常见形式（以 A64 汇编为例）：
+
+```asm
+movi Vd.<T>, #imm
+movi Vd.<T>, #imm, LSL #shift
+movi Vd.<T>, #imm, MSL #shift
+```
+
+其中：
+
+- `Vd`：目标寄存器（例如 `v0`、`v1`）
+- `<T>`：数据类型（如 `8b`、`16b`、`4h`、`2s`、`1d` 等）
+- `#imm`：立即数
+- `LSL` / `MSL`：逻辑左移 / 按符号扩展左移，用来改变立即数填充规则
+
+### 反转指令
+
+- REV16指令
+
+> 表示矢量寄存器中的16位数据元素组成一个容器。在这个16位的容器里，颠倒8位数据元素的顺序，即颠倒B[0]和B[1]之间的顺序
+
+- REV32指令
+
+> 表示矢量寄存器中的32位数据元素组成一个容器。在这个容器里，颠倒8位数据元素或者16位数据元素的顺序
+
+- REV64指令
+
+> 表示矢量寄存器中的64位数据元素组成一个容器。在这个容器里，颠倒8位，16位或者32位数据元素的顺序
+
+例子1：
+
+```asm
+		REV16 V0.16B, V1.16B
+```
+
+V0是目标寄存器，V1是源寄存器
+
+![image-20251008132648034](running_linux_armv8.assets/image-20251008132648034.png)
+
+例子2：
+
+```asm
+	REV32 V0.16B, V1.16B
+```
+
+![image-20251008132753073](running_linux_armv8.assets/image-20251008132753073.png)
+
+例子3：
+
+```asm
+	REV64 V0.16B, V1.16B
+```
+
+![image-20251008132833552](running_linux_armv8.assets/image-20251008132833552.png)
+
+### ZIP1和ZIP2指令
+
+- ZIP1指令会分别从两个源矢量寄存器中提取一半的数据元素，然后交织地组成一个新的矢量，写入到目标矢量寄存器中
+- ZIP2指令会分别从两个源矢量寄存器中提取一半地数据元素，这里提取源矢量寄存器中**高位部分**的数据元素，然后交织地组成一个新的矢量，写入到目标矢量寄存器中
+
+例子：
+
+```asm
+ZIP1 V0.8H, V3.8H, V4.8H
+ZIP2 V1.8H, V3.8H, V4.8H
+```
+
+![image-20251008133942793](running_linux_armv8.assets/image-20251008133942793.png)
+
+### TRN1和TRN2交错交换指令
+
+- TRN1指令从两个源矢量寄存器中交织地提取奇数的元素数据元素来组成一个新的矢量，写入到目标矢量寄存器中
+- TRN2指令从两个源矢量寄存器中交织地提取偶数地数据元素来组成一个新的矢量，写入到目标矢量寄存器中
+
+例子
+
+```asm
+TRN1 V1.4S, V0.4S, V3.4S
+```
+
+![image-20251008134325776](running_linux_armv8.assets/image-20251008134325776.png)
+
+```asm
+TRN2 V2.4S, V0.4S, V3.4S
+```
+
+![image-20251008134409603](running_linux_armv8.assets/image-20251008134409603.png)
+
+### TBL查表指令
+
+- TBL指令格式如下
+
+![image-20251008134609119](running_linux_armv8.assets/image-20251008134609119.png)
+
+例子：
+
+```asm
+TBL V4.16B, {V1.16B, V2.16B}, V0.16B
+```
+
+![image-20251008134658637](running_linux_armv8.assets/image-20251008134658637.png)
+
+还有一个变种指令TBX，唯一区别是在索引越界时保持原值不变而不是写0
+
+### 乘加指令MLA
+
+- MLA指令乘加指令，Vd += Vn * Vm
+- 例子
+
+```asm
+mla v2.4s, v0.4s, v1.4s
+```
+
+![image-20251008135156163](running_linux_armv8.assets/image-20251008135156163.png)
+
+这种方式支持b
+
+```asm
+mla v2.4s, v0.4s, v1.4s[0]
+```
+
+![image-20251008135223965](running_linux_armv8.assets/image-20251008135223965.png)
+
+这种方式支持h和s不支持b
+
+### 实验5：熟悉MLA指令
+
+![image-20251008135415599](running_linux_armv8.assets/image-20251008135415599.png)
+
+```asm
+neon_mla_test:
+    stp x29, x30, [sp, -16]!
+    movi v3.16b, 0
+    movi v4.16b, 0
+    // 从x0地址连续读取16个字节放入v0.16b
+    ld1 {v0.16b}, [x0], 16
+    ld1 {v1.16b}, [x0], 16
+    mla v3.16b, v0.16b, v1.16b
+    mla v3.16b, v0.16b, v1.16b
+
+    mov w1, #0
+    mov v2.4s[0], w1
+    mov w1, #1
+    mov v2.4s[1], w1
+    mov w1, #2
+    mov v2.4s[2], w1
+    mov w1, #3
+    mov v2.4s[3], w1
+    mov w1, #4
+    mov v5.4s[0], w1
+    mov w1, #5
+    mov v5.4s[1], w1
+    
+    mla v4.4s, v2.4s, v5.4s[0]
+    mla v4.4s, v2.4s, v5.4s[1]
+    ldp x29, x30, [sp], 16
+    ret
+
+```
+
+
+
+### 矢量算数指令
+
+![image-20251008143306448](running_linux_armv8.assets/image-20251008143306448.png)
+
+### 实验6：案例分析1-RGB24转BGR24
+
+**C语言实现**
+
+![image-20251008143619631](running_linux_armv8.assets/image-20251008143619631.png)
+
+**内嵌汇编**
+
+![image-20251008143709370](running_linux_armv8.assets/image-20251008143709370.png)
+
+注意两点：
+
+1. 使用后变基模式，所以dst,src要放在输出部
+2. 破坏部中要告诉编译器使用了v0,v1,v2,v3这四个编译器，否则编译器可能会在其他地方分配了这些矢量寄存器
+
+
+
+**使用NEON内建函数**
+
+编译器封装的neon的一些指令
+
+![image-20251008144045612](running_linux_armv8.assets/image-20251008144045612.png)
+
+文档：
+
+- \<\<Arm Neon Intrinsics Reference for ACLE Q3 2020\>\>
+- \<\<NEON Programmer Guide\>>
+
+### 4×4矩阵乘积
+
+![image-20251008145316886](running_linux_armv8.assets/image-20251008145316886.png)
+
+C语言实现
+
+![image-20251008150211210](running_linux_armv8.assets/image-20251008150211210.png)
+
+手工编写NEON汇编
+
+![image-20251008150258039](running_linux_armv8.assets/image-20251008150258039.png)
+
+**使用NEON内建函数**
+
+![image-20251008150550770](running_linux_armv8.assets/image-20251008150550770.png)
+
+![image-20251008150607324](running_linux_armv8.assets/image-20251008150607324.png)
+
+
+
+![image-20251008150845410](running_linux_armv8.assets/image-20251008150845410.png)
+
+![image-20251008150857087](running_linux_armv8.assets/image-20251008150857087.png)
+
+![image-20251008151018370](running_linux_armv8.assets/image-20251008151018370.png)
+
+![image-20251008151054784](running_linux_armv8.assets/image-20251008151054784.png)
+
+
+
+![image-20251008151125038](running_linux_armv8.assets/image-20251008151125038.png)
+
+
+
+### 自动矢量优化
+
+- 使用NEON指令集优化代码有如下三种做法：
+  - 手工编写NEON汇编代码
+  - 使用编译器提供的NEON内建函数（NEON Intrinsics）
+  - 使用编译器提供的自动矢量优化（Auto-vectorization）选项，让编译器自动生成NEON指令来进行优化
+- GCC汇编器内置了自动矢量优化功能。GCC提供如下几个编译选项：
+  - -ftree-vectorize：执行矢量优化。这个会默认使能"-ftree-loop-vectorize"与"-ftree-slp-vectorize"
+  - -ftree-loop-vectorize：执行循环矢量优化。展开循环以减少迭代次数，同时在每个迭代中执行更多的操作。
+  - -ftree-slp-vectorize：将标量操作捆绑在一起，以利用矢量寄存器的带宽。SLP是Superword-Level-Parallelism的缩写
+  - GCC的"O3"优化选项会自动使能"-ftree-vectorize"，即使能自动矢量优化功能
+
+
+
+**自动矢量优化约束条件**
+
+- GCC自动矢量优化功能在有些情况下可能不工作
+  - 在有相互依赖关系的不同循环的迭代
+  - 带有break子句的循环
+  - 具有复杂条件的循环
+
+
+
+## SVE/SVE2指令优化
+
+> Scalable Vecotr Extension
+
+- SVE相关的手册：
+  - <<ARM Architecture Reference Manual Supplement, The Scalable Vector Extension>>
+  - <<ARM A64 Instruction Set Architecture ARMv9, for Armv9-A architecture profile>>
+
+### 可扩展矢量指令SVE/SVE2
+
+- SVE全称Scalable Vector Extension
+- 第一版在ARMv8.2加入，第二版在ARMv9加入
+- SVE是针对高性能计算（HPC）和机器学习领域开发的一套全新的矢量指令集，它是下一代SIMD指令集实现，而**不是NEON指令集的简单扩展**
+- SVE指令集中有很多概念与NEON指令集类似，例如矢量，通道，数据元素等
+- SVE提出一个全新的概念：**可变矢量长度编程模型** （Vector Length Agnostic，VLA）
+
+### SVE寄存器
+
+- 32个全新的可变长矢量寄存器Z0~Z31
+- 16个可预测寄存器（predicate register）P0~P15
+- 首次错误预测寄存器（First Fault predicate Register，FFR）
+- SVE控制寄存器ZCR_ELx
+
+> 设置矢量寄存器长度
+
+| 寄存器类型 | 名称     | 数量  | 每个寄存器长度 | 说明                             |
+| ---------- | -------- | ----- | -------------- | -------------------------------- |
+| Z 寄存器   | `Z0–Z31` | 32 个 | VL bits        | 向量数据寄存器                   |
+| P 寄存器   | `P0–P15` | 16 个 | VL / 8 bits    | **预测寄存器（mask）**           |
+| FFR        | `FFR`    | 1 个  | VL / 8 bits    | 最终掩码（First-Fault Register） |
+
+矢量长度称为**vector length**
+
+#### 可变长矢量寄存器
+
+![image-20251008161734254](running_linux_armv8.assets/image-20251008161734254.png)
+
+
+
+#### 预测寄存器
+
+![image-20251008161816176](running_linux_armv8.assets/image-20251008161816176.png)
+
+### SVE指令语法
+
+- SVE指令格式由操作代码，目标寄存器，P寄存器和输入操作符组成
+
+```asm
+LD1D {<Zt>.D}, <Pg>/Z, [<Xn|SP>, <Xm>, LSL #3]
+```
+
+```asm
+ADD <Zdn>.<T>, <Pg>/M, <Zdn>.<T>, <Zm>.<T>
+```
+
+
+
+### SVE实验环境
+
+**早期 Cortex-A 核心**
+
+- **Cortex-A53 / A55 / A57 / A72 / A76 / A77 / A78**
+  - 仅支持 **NEON（128-bit SIMD）**，不支持 SVE 或 SVE2
+
+**QEMU**
+
+```bash
+qemu-system-aarch64 -m 1024 -cpu max,sve=on,sve256=on -M virt,gic-version=3,its=on,iommu=smmuv3\
+			-nographic $SMP -kernel arch/arm64/boot/Image \
+			-append \"$kernel_arg $debug_arg $rootfs_arg $crash_arg $dyn_arg\"\
+			-drive if=none,file=$rootfs_image,id=hd0\
+			-device virtio-blk-device,drive=hd0\
+			--fsdev local,id=kmod_dev,path=./kmodules,security_model=none\
+			-device virtio-9p-pci,fsdev=kmod_dev,mount_tag=kmod_mount\
+			$DBG"
+
+
+# 编译,注意必须加上-march=armv8-a+sve参数
+gcc -g -march=armv8-a+sve -o hello hello_sve.S
+```
+
+![image-20251008172109735](running_linux_armv8.assets/image-20251008172109735.png)
+
+### SVE特有编程模式1：预测指令
+
+- SVE指令集为了支持可变长矢量计算提供了预测管理机制（Governing predicate）
+- 预测指令会使用预测管理机制来预测矢量寄存器中活跃状态的数据元素有哪些。在预测指令中仅仅处理这些活跃状态的数据元素，对于不活跃的数据元素是不进行处理的。
+- 例子：
+
+![image-20251008174533120](running_linux_armv8.assets/image-20251008174533120.png)
+
+
+
+### 合并预测与零预测
+
+- 零预测（zeroing predication）:在目标矢量寄存器中，不活跃状态数据元素的值填充0
+- 合并预测（merging predication）:在目标矢量寄存器中，不活跃状态数据元素保持原值不变
+
+**零预测**
+
+![image-20251008174846187](running_linux_armv8.assets/image-20251008174846187.png)
+
+**合并预测**
+
+![image-20251008174902085](running_linux_armv8.assets/image-20251008174902085.png)
+
+### SVE特有编程模式2：聚合加载和离散存储
+
+- 支持聚合加载（Gather-load）和离散存储（scatter-store）模式
+- 聚合加载和离散存储指的是可以**使用矢量寄存器中每个通道的值作为基地址或者偏移量来实现非连续地址的加载和存储**
+- 传统的NEON指令集只能支持线性地址的加载和存储功能
+
+例子：聚合加载，加载多个离散地址的值
+
+![image-20251008175319504](running_linux_armv8.assets/image-20251008175319504.png)
+
+离散存储
+
+![image-20251008175527093](running_linux_armv8.assets/image-20251008175527093.png)
+
+### SVE特有编程模式3：基于预测的循环控制
+
+- 以**预测寄存器Pn**中**活跃状态的数据元素为对象来实现循环控制的**
+- PSTATE与NVCZ状态标志位
+- SVE指令集提供如下几组与循环控制相关的指令
+  - 初始化预测寄存器的指令，例如WHILELO等
+  - 根据预测约束条件增加数据元素的统计计数，例如INCB等
+  - 根据SVE条件操作码，与跳转指令结合来完成条件跳转功能，例如B.FIRST等
+  - 基于数据元素为对象的比较指令，例如CMPEQ指令等
+  - 退出循环指令，例如BRKA指令
+
+### PSTATE处理器状态和NCZV
+
+- 以数据元素为对象的循环控制方法可以和处理器状态PSTATE有机结合起来
+  - 当SVE生成一个预测结果时会更新PSTATE的NCVZ状态标志位
+  - SVE指令会根据预测寄存器的结果或者FFR寄存器来更新PSTATE的NCVZ状态标志位
+  - SVE指令也可以根据CTERMEQ/CTERMNE指令来更新PSTATE的NCVZ状态标志位
+
+![image-20251008180348447](running_linux_armv8.assets/image-20251008180348447.png)
+
+
+
+### 初始化预测寄存器指令
+
+类似C语言的while循环，给定一个初始值和目标值，以一个矢量寄存器包含数据元素的个数为步长，然后以递增或者递减的方式来遍历并初始化预测寄存器中的数据元素
+
+![image-20251008180551813](running_linux_armv8.assets/image-20251008180551813.png)
+
+以whilelt为例
+
+```asm
+whilelt  <pd>.<T>, <Rn>, <Rm>
+```
+
+- \<pd\>：目标预测寄存器（如 p0、p1）
+- \<T\>：元素类型（如 .b, .h, .s, .d）
+- \<Rn\>：起始索引或计数寄存器
+- \<Rm\>：结束索引或上限寄存器
+
+```c
+p[i] = (Rn + i*sizeof(T)/8 < Rm) ? 1 : 0
+```
+
+- 从 Rn 开始，逐个元素地比较索引；
+- 只要当前索引还“小于 Rm”，就把对应的 `p` 位设置为 1；
+- 一旦超出，就置 0。
+
+| 类型 | 元素位宽 | 每步增量（bytes） | 举例       |
+| ---- | -------- | ----------------- | ---------- |
+| `.b` | 8-bit    | 1                 | 1 字节对齐 |
+| `.h` | 16-bit   | 2                 | 2 字节对齐 |
+| `.s` | 32-bit   | 4                 | 4 字节对齐 |
+| `.d` | 64-bit   | 8                 | 8 字节对齐 |
+
+**例子**
+
+```asm
+whilelt p0.b, xzr, x2
+```
+
+- p0.b b表示要预测的寄存器通道数是8位宽
+- xzr是起始值
+- x2是目标值，从低到高以递增方式达到x2为止或者已经初始化完预测寄存器中所有值
+
+### SVE条件操作码
+
+![image-20251008191232626](running_linux_armv8.assets/image-20251008191232626.png)
+
+### 根据预测约束条件增加数据元素的统计计数
+
+![image-20251008191259116](running_linux_armv8.assets/image-20251008191259116.png)
+
+### 基于数据元素为对象的比较指令
+
+![image-20251008191335752](running_linux_armv8.assets/image-20251008191335752.png)
+
+### Break循环指令
+
+- BRKA指令
+
+```asm
+BRKA <Pd>.B, <Pg>/<ZM>, <Pn>.B
+```
+
+> break after
+
+![image-20251008191508280](running_linux_armv8.assets/image-20251008191508280.png)
+
+- BRKB
+
+```asm
+BRKB <Pd>.B, <Pg>/<ZM>, <Pn>.B
+```
+
+![image-20251008191729834](running_linux_armv8.assets/image-20251008191729834.png)
+
+### 实验2：使用SVE指令实现memcpy_1b()函数
+
+![image-20251008191844509](running_linux_armv8.assets/image-20251008191844509.png)
+
+```asm
+.global sve_ld1_test
+// x0 = dest
+// x1 = src
+// x2 = size
+sve_ld1_test:
+	mov x3, #0
+	// p0[i] = ((x3 + i) < x2) ? 1 : 0
+	whilelt p0.b, x3, x2
+1:
+	// 使用/z避免垃圾值，未加载的元素全部变为 0
+	ld1b {z0.b}, p0/z, [x1, x3]
+	// 全部写入，不需要/z
+	st1b {z0.b}, p0, [x0, x3]
+	incb x3
+	whilelt p0.b,x3, x2
+	b.any 1b
+	
+	ret
+```
+
+假设**VL**是256，那么p0最多可以描述32个8位宽（B）的计数寄存器，所以incb x3会让x3从0变为32（32个字节）
+
+whilelt p0.b, x3, x2这条指令当x3=32时，p0.b全为0
+
+b.any表示只要矢量寄存器中有一个元素是活跃的都会触发跳转
+
+### 实验3：使用SVE指令实现memcpy_4b()函数
+
+![image-20251008194453089](running_linux_armv8.assets/image-20251008194453089.png)
+
+```asm
+.global sve_ld1_test
+sve_ld1_test:
+	lsr x2, x2, 2
+	mov x3, #0
+	whilelt p0.s, x3, x2
+1:
+	ld1w {z0.s}, p0/z, [x1, x3, lsl 2]
+	st1w {z0.s}, p0, [x0, x3, lsl 2]
+	incw x3
+	whilelt p0.s, x3, x2
+	b.any 1b
+	
+	ret
+```
+
+
+
+
+
+![image-20251008200806137](running_linux_armv8.assets/image-20251008200806137.png)
+
+### SVE特有编程模式4：基于软件推测的向量分区
+
+- NEON不支持推测式加载操作（speculative load），SVE支持
+- 推测式加载操作遇到的难题：如果在读取过程中某些元素发生内存错误（memory fault）或者访问了无效页面（invalid page），可能很难跟踪究竟是哪个通道的数据读取操作造成的
+- SVE引入：
+  - 首次异常预测寄存器（First-Fault predicate Register，FFR）
+  - 首次异常加载指令，例如**LDFF1B**
+
+例子：
+
+```asm
+LDFF1D Z0.D, P0/Z, [Z1.D]
+```
+
+以Z1.D寄存器中每个通道的值为基地址，加载其地址对应的元素到Z0
+
+![image-20251008202226882](running_linux_armv8.assets/image-20251008202226882.png)
+
+第三个通道是无效地址，直接标记为加载失败而不向CPU报告
+
+### SVE/SVE2指令
+
+- SVE是在ARMv8.2加入，SVE2是在ARMv9加入
+- SVE/SVE2指令手册：\<\<Arm A64 Instruction Set Architecture Armv9, for Armv9-A architecture profile\>\>
+- SVE指令集包含了几百条指令，它们可以分成如下几大类
+  - 加载存储指令以及预取指令
+  - 向量移动指令
+  - 整数运算指令
+  - 位操作指令
+  - 浮点数运算指令
+  - 预测操作指令
+  - 数据元素操作指令
+- 如何阅读指令手册：
+
+![image-20251008202951167](running_linux_armv8.assets/image-20251008202951167.png)
+
+
+
+### 实验4：案例分析1-使用SVE指令来优化strcmp函数
+
+![image-20251008203146676](running_linux_armv8.assets/image-20251008203146676.png)
+
+- 使用SVE指令来优化strcmp()有两个难点：
+  - 难点1：字符串str1和str2的长度是未知的。在C语言中通过判断字符是否为'\\0'来确定字符串的结束。而矢量运算中，SVE加载指令一次装载多个通道的数据。如果装在了字符串结束后的数据，那么会造成非法访问，导致程序出错。
+  - 难点2：尾数问题
+
+
+
+```asm
+.global strcmp_sve
+strcmp_sve:
+    ptrue p5.b                       // p5 = 全1 预测寄存器（以 byte 为元素单位），用于表示“处理所有字节 lane”
+    setffr                           // 初始化 / 清空 First-Fault Register (FFR)，为 fault-first loads 做准备
+
+    mov x5, #0                       // x5 = byte 偏移索引（从 0 开始），用于对两个字符串的偏移
+
+l_loop:
+    ldff1b z0.b, p5/z, [x0, x5]      // 从 (x0 + x5) 开始做 fault-first byte 加载到 z0（按 p5 lanes）
+                                     // 如果发生分非法访问等 fault，FFR 会记录已成功加载的 lanes
+    ldff1b z1.b, p5/z, [x1, x5]      // 同理，从 (x1 + x5) 加载到 z1（与上面一样使用 fault-first）
+    rdffrs p7.b, p5/z                // 读取并清除 FFR，将"已成功加载的 lanes 的掩码"写入 p7（按 p5 lanes），
+                                     // 使我们知道上面两个 ldff1b 实际成功加载了多少 lanes（若没有 fault，p7==p5）
+    b.nlast l_fault                  // 如果不是最后块（即发生了fault/只加载了部分 lanes），跳到 l_fault 处理部分加载
+                                     // 即若加载被中断/部分完成，需要走故障处理路径
+
+    incb x5                          // x5 += VL_bytes（按 SVE 的当前向量长度增加偏移），准备下一个完整向量块
+    cmpeq p0.b, p5/z, z0.b, #0       // p0[i] = (z0[i] == 0) —— 检测 s1 中是否出现 NUL 字节
+    cmpne p1.b, p5/z, z0.b, z1.b     // p1[i] = (z0[i] != z1[i]) —— 检测两个字符串字节是否不同
+l_test:
+    orrs p4.b, p5/z, p0.b, p1.b      // p4 = p0 OR p1；orrs 会同时更新整数条件码（NZ），用于后面的分支
+                                     // p4 表示“该 lane 上已到终止条件（NUL 或 不等）”
+    b.none l_loop                    // 如果 p4 中没有任何位为真（即 none true），继续循环加载下一个向量块
+
+l_retrun:
+    brkb p4.b, p5/z, p4.b            //  这里的作用是把 p4 处理成便于提取“第一次发生的位置”的形式。
+                                     // 一种常见做法是把要提取的那一位（在当前块中最先出现的 true 位）放到向量的最后位
+                                     // 这样可用后续的 lasta 指令直接从该位取出对应的字节。
+                                     
+    lasta w0, p4, z0.b               // 从 z0 中提取被 brkb 定位的那个字节到 w0（提取成 32 位寄存器）
+                                     // lasta 的作用是基于 p4 的“最后有效位”提取对应的元素值（zero-extended/或按无符号扩展）
+    lasta w1, p4, z1.b               // 同上，从 z1 中提取对应的字节到 w1
+    sub w0, w0, w1                   // 计算差值 w0 = (byte_from_z0) - (byte_from_z1)，作为 strcmp 的返回值
+    ret                              // 返回（返回值在 w0 中）
+
+l_fault:
+    incp x5, p7.b                    // x5 += 已成功加载的 byte 数（由 p7 指示的真位数，按 byte 为单位）
+                                     // 这样 x5 指向接下来要继续处理的位置（已经处理过的那部分不用再读）
+    setffr                           // 重新初始化/清空 FFR，为下一次 fault-first 加载做好准备
+    cmpeq p0.b, p7/z, z0.b, #0       // 在刚加载成功的那些 lanes 上比较 z0 是否为 0（只在 p7 指示的 lanes 上有效）
+    cmpne p1.b, p7/z, z0.b, z1.b     // 在刚加载成功的那些 lanes 上比较 z0 与 z1 是否不等
+    b l_test                         // 跳回统一的终止检测（l_test 会做 OR 并决定是否继续或转到返回路径）
+```
+
+![image-20251008204555946](running_linux_armv8.assets/image-20251008204555946.png)
+
+### 案例5：RGB24转BGR24
+
+![image-20251008205445636](running_linux_armv8.assets/image-20251008205445636.png)
+
+### 案例6：4×4乘积矩阵
+
+![image-20251008205805281](running_linux_armv8.assets/image-20251008205805281.png)
+
+![image-20251008205821066](running_linux_armv8.assets/image-20251008205821066.png)
+
+**和Neon指令不同的地方**
+
+![image-20251008210002348](running_linux_armv8.assets/image-20251008210002348.png)
+
+![image-20251008210107910](running_linux_armv8.assets/image-20251008210107910.png)
+
+### 总结：上面用到的SVE指令
+
+- whilelt/whilelo类指令
+- b.Any类跳转指令
+- BRKA和BRKB指令
+- LASTA指令
+- LD1和ST1指令
+- LD3和ST3指令
+- FMLA指令
+- INCB类指令
+- ld1ff1b类指令
+- Setffr和rdffrs类指令
+- Cmpeq和cmpne类指令
+- Mov类指令
+
+
+
+## GICv3中断控制器
+
+### GICv3比GICv2改进了哪些内容
+
+- GICv3兼容GICv2
+- 支持更多CPU数量，>8
+- 支持message-base中断
+- 支持ITS（Interrupt Translation Service）服务
+- 支持更多的硬件中断号，>1020
+- 为了更好兼容ARMv8异常模型，支持中断组（Interrupt grouping）
+- 为了优化访问延时，提供系统寄存器的方式来访问CPU Interface
