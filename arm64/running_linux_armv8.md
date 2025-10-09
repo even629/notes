@@ -7653,3 +7653,137 @@ l_fault:
 - 支持更多的硬件中断号，>1020
 - 为了更好兼容ARMv8异常模型，支持中断组（Interrupt grouping）
 - 为了优化访问延时，提供系统寄存器的方式来访问CPU Interface
+
+
+
+### GICv3支持的中断类型
+
+- **Private Peripheral Interrupt（PPI）**
+  - PPI是指本地CPU特有的中断，比如CPU内部的定时器等。不同的CPU可以使用相同的PPI中断号
+  - PPI可以在group0和group1
+  - 可以边沿触发（edge-triggered）或者水平触发（level-sensitve）
+- **Shared Peripheral Interrupt（SPI）**
+  - SPI通常用于外设中断，它可以路由到任意一个CPU
+  - SPI可以在group0和group1
+  - 可以边沿触发或者水平触发
+- **Software Generated Interrupt（SGI）**
+  - SGI通常软件触发的中断，用于核间通信，例如IPI（Inter-Processor Interrupts）
+  - SGI只能边沿触发
+- 新增：**Locality-specific Peripheral Interrupt（LPI）**
+  - 在非安全中断组1
+  - 边沿触发
+  - 使用ITS服务
+  - 没有active状态
+  - message-based中断
+
+### 有线中断与基于消息的中断
+
+![image-20251009141946437](running_linux_armv8.assets/image-20251009141946437.png)
+
+![image-20251009141956246](running_linux_armv8.assets/image-20251009141956246.png)
+
+- SPI和LPI都支持message-base中断
+  - SPI的message-base中断不需要经过ITS，往**GICD_SETSPI_NSR**寄存器写入中断号触发中断
+  - LPI的message-base需要ITS
+
+
+
+
+
+### 中断号分配
+
+![image-20251009142233146](running_linux_armv8.assets/image-20251009142233146.png)
+
+### 中断状态机
+
+- **Inactive** 不活跃状态
+- **Pending** 中断触发了，但是还没有被CPU响应（acknowledge）
+- **Active**  中断被CPU响应和处理
+- **Active & Pending** 当前有一个中断正在被CPU响应和处理，这时有一个相同的中断触发了，这个新的中断被设置为active & pending
+- **LPI**没有active和active & pending状态
+
+
+
+> 问题：如果GIC在响应中断的过程中，又有一个相同的中断触发了，那怎么办？
+>
+> 这里要分两种情况：
+>
+> - 如果GIC正在响应第一个中断时，即第一个中断的状态为active，此时第二个相同的中断触发，那么蝶儿个中断的状态会变成 active & pending，这样避免丢失了中断
+> - 如果第一个中断还处于pending状态，此时又来了一个相同的中断，那么它们会merge成一个
+
+![image-20251009142918490](running_linux_armv8.assets/image-20251009142918490.png)
+
+
+
+### 中断亲和性路由层级（Affinity routing）
+
+- GICv3支持4级路由
+- Level 0面对的是redistributor
+
+![image-20251009143149657](running_linux_armv8.assets/image-20251009143149657.png)
+
+![image-20251009143201412](running_linux_armv8.assets/image-20251009143201412.png)
+
+### GIC-500的中断亲和性路由
+
+![image-20251009143324963](running_linux_armv8.assets/image-20251009143324963.png)
+
+- GIC-500支持两级的亲和性路由
+  - Level 0 是 core
+  - Level 1 是 cluster
+- GIC-500最大支持128个cores以及32个cluster
+
+0.0.0.1表示第0个cluster中的第1个core
+
+0.0.1.1表示第1个cluster中的第1个core
+
+
+
+- 中断组与安全模式
+  - ARMv8支持安全模式和非安全模式
+  - GICv3支持EL0~EL3，所以每个中断源都需要设置对应的中断组和安全模式
+    - Group0用于EL3
+    - 安全模式的Group1：用于Trust OS on EL2
+    - 非安全模式的Group1：用于VMM或者OS
+
+![image-20251009143825096](running_linux_armv8.assets/image-20251009143825096.png)
+
+**Group0使用FIQ，Group1根据情况使用IRQ or FIQ**
+
+![image-20251009143905363](running_linux_armv8.assets/image-20251009143905363.png)
+
+![image-20251009143925894](running_linux_armv8.assets/image-20251009143925894.png)
+
+
+
+**例子**
+
+![image-20251009144136472](running_linux_armv8.assets/image-20251009144136472.png)
+
+> 注意：中断是否会路由到EL3要看SCR_EL3寄存器FIQ和IRQ字段
+
+- 在非安全模式下：
+  - 非安全group1的中断直接在RichOS响应
+  - 安全group1和Group0的FIQ中断路由到EL3
+- 在安全模式下
+  - 安全group1的IRQ中断直接在Trusted OS响应
+  - 非安全group1和group0的FIQ中断路由到EL3
+
+
+
+### 特殊中断号
+
+![image-20251009144717625](running_linux_armv8.assets/image-20251009144717625.png)
+
+### 1021号中断的使用1
+
+![image-20251009144819643](running_linux_armv8.assets/image-20251009144819643.png)
+
+1. CPU运行在安全模式下的trusted os，此时来了一个非安全模式下的OS的中断，那么需要陷入到EL3的FIQ来处理
+2. CPU陷入到EL3的安全监视器，安全监视器会读取IAR寄存器，并且读到1021，说明这个中断是希望在非安全模式下处理的。切换到非安全模式的Rich OS
+3. CPU切换到非安全模式的Rich OS来处理这个中断
+
+### 1021号中断的使用2
+
+![image-20251009145147749](running_linux_armv8.assets/image-20251009145147749.png)
+
