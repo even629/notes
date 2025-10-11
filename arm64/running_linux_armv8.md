@@ -7648,8 +7648,8 @@ l_fault:
 
 - GICv3兼容GICv2
 - 支持更多CPU数量，>8
-- 支持message-base中断
-- 支持ITS（Interrupt Translation Service）服务
+- 支持message-base中断（**Message Signaled Interrupt**，**MSI**）
+- 支持**ITS**（**Interrupt Translation Service**）服务
 - 支持更多的硬件中断号，>1020
 - 为了更好兼容ARMv8异常模型，支持中断组（Interrupt grouping）
 - 为了优化访问延时，提供系统寄存器的方式来访问CPU Interface
@@ -7675,6 +7675,8 @@ l_fault:
   - 使用ITS服务
   - 没有active状态
   - message-based中断
+
+![image-20251010135558355](running_linux_armv8.assets/image-20251010135558355.png)
 
 ### 有线中断与基于消息的中断
 
@@ -7775,7 +7777,7 @@ l_fault:
 
 ![image-20251009144717625](running_linux_armv8.assets/image-20251009144717625.png)
 
-### 1021号中断的使用1
+#### 1021号中断的使用1
 
 ![image-20251009144819643](running_linux_armv8.assets/image-20251009144819643.png)
 
@@ -7783,7 +7785,1791 @@ l_fault:
 2. CPU陷入到EL3的安全监视器，安全监视器会读取IAR寄存器，并且读到1021，说明这个中断是希望在非安全模式下处理的。切换到非安全模式的Rich OS
 3. CPU切换到非安全模式的Rich OS来处理这个中断
 
-### 1021号中断的使用2
+#### 1021号中断的使用2
 
 ![image-20251009145147749](running_linux_armv8.assets/image-20251009145147749.png)
 
+1. CPU运行在安全模式下的trusted os，此时来了一个非安全模式下OS的中断。那么需要陷入到EL3的FIQ来处理。但是由于SCR_EL3.FIQ=0，它只能在EL2中处理。
+2. EL2的Trusted OS执行SMC系统调用陷入到EL3
+3. 安全监视器会读取IAR寄存器，并且读到1021，说明这个中断是希望在非安全模式下处理的。切换到非安全模式的Rich OS
+4. CPU切换到非安全模式的Rich OS来处理这个中断
+
+### 中断优先级
+
+- GICv3支持8位优先级，最多256级别
+  - 支持2个安全模式时，最少支持32个中断优先级，最多支持256个
+  - 支持1个安全模式时，最少支持16个中断优先级
+- 中断优先级
+  - 数值越小，中断优先级越高，0表示最高优先级，255表示最低优先级，idle priority
+  - GICR_IPRIORITYR\<n\> 设置PPI和SGI中断优先级
+  - GICD_IPRIORITYR\<n\> 设置SPI中断优先级
+  - LPI配置表保存了LPI的中断优先级
+
+#### 中断优先级分组寄存器（ICC_BPR0_EL1/ICC_BPR1_EL1）
+
+- Binary Point Register寄存器把中断优先级分成两个字段
+  - group priority 需要抢占时，优先比较group priority
+  - subpriority   当需要抢占时，只有当group priority相同时，才比较subpriority
+
+![image-20251010105121747](running_linux_armv8.assets/image-20251010105121747.png)
+
+Group0的中断优先级分组情况，见ICC_BPR0_EL1寄存器
+
+注意：group1和group0的分组情况略有不同
+
+#### 中断优先级阈值与运行中断优先级
+
+- 中断阈值
+  - 寄存器：ICC_PMR_EL1
+  - PMR决定目标CPU的优先级阈值。GIC只有当pending中断的优先级高于这个中断优先级阈值，才会发送中断到CPU
+  - PMR为0，表示屏蔽了所有中断发送给CPU
+- Running priority
+  - 寄存器：ICC_PMR_EL1
+  - 返回正在响应中的group priority
+
+#### 中断优先级的抢占
+
+- GICv3支持中断抢占，当一个中断优先级同时满足下面条件
+  - 优先级高于CPU接口的优先级阈值PMR
+  - Group priority高于正在处理的running prirority
+
+
+
+
+
+### GICv3内部架构
+
+![image-20251010105724987](running_linux_armv8.assets/image-20251010105724987.png)
+
+- Distributor：优先级排队，派发SPI和SGI到redistributor
+- Redistributor：连接CPU interface。每个CPU一个redistributor
+- CPU interface：发送中断给CPU，响应中断等
+- ITS: 中断转换服务，把LPIs中断请求转换到中断号以及发送到redistributor
+
+
+
+### ITS服务（Interrupt translation service）
+
+- ITS作用：把设备（device_id）的Event_ID转成：
+  - 硬件中断号（INTID）
+  - 目标redistributor
+- ITS转换过程
+  - 使用Device_ID来查询device table
+  - 使用Event_ID来查询Interrupt translation table
+    - 物理中断号INTID
+    - interrupt collection number
+  - 由ICID来查询Collection table得到目标redistributor
+- ITS五张表
+  - 中断配置表configure table
+  - 中断pending表
+  - device table
+  - Interrupt translation table
+  - Collection table
+
+![image-20251010110352750](running_linux_armv8.assets/image-20251010110352750.png)
+
+![image-20251010140039638](running_linux_armv8.assets/image-20251010140039638.png)
+
+#### 配置表和pending表
+
+- **中断配置表**用来存储每个LPI中断的优先级和enable位
+
+  - 每个表项占8bit
+  - 配置表基地址：GICR_PROPBASER.Physical_Address
+  - 表项个数：2^(GICR_PROPBASER.IDbits)
+
+  ![image-20251010111038377](running_linux_armv8.assets/image-20251010111038377.png)
+
+![image-20251010110915247](running_linux_armv8.assets/image-20251010110915247.png)
+
+
+
+- **中断pending** 用来表示每个LPI中断的pending状态
+  - 每个表项占1个bit
+  - 每个redistributor有一个中断pending表
+
+![image-20251010111028122](running_linux_armv8.assets/image-20251010111028122.png)
+
+#### Device Table的创建
+
+- Device Table由OS软件创建
+  - 分配内存，创建Table
+  - 把表的基地址设置到GITS_BASER.Physical_Address
+- Device Table的重要参数在GITS_BASER\<n\>寄存器中
+  - 表的类型：GITS_BASER.Type
+  - 表项的大小：GITS_BASER.Entry_Size（8个字节）
+  - Table中每个page的大小：GITS_BASER.Page_Size（eg, 64KB）
+  - 是否需要二级页表：GITS_BASER_Indirect
+  - 设置表基地址：GITS_BASER.Physical_Address
+  - 需要多少个表项：2^(device_id位宽)，device_id位宽在GITS_TYPER.devbits
+
+- Device Table支持1级或者2级表
+- Ddevice Table表项的内容由：
+  - 软件通过command queue来发送命令给硬件，硬件来填充表项
+  - 通过MAPD命令，把deviceID映射到ITT表中
+
+![image-20251010112026541](running_linux_armv8.assets/image-20251010112026541.png)
+
+![image-20251010112040856](running_linux_armv8.assets/image-20251010112040856.png)
+
+- Device Table的表项叫做DTT，用来指向ITT表的
+
+![image-20251010135707597](running_linux_armv8.assets/image-20251010135707597.png)
+
+- ITT的表项叫做ITE，用来描述EventID和最终物理ID号的关系
+
+![image-20251010135818459](running_linux_armv8.assets/image-20251010135818459.png)
+
+
+
+#### Interrupt translation table的创建
+
+- ITT表项用来映射 **EventID -> 物理中断号INTID以及ICID**
+- ITT重要参数
+  - ITT表项大小：GITS_TYPER.ITT_entry_size（eg：16字节）
+  - ITT表项个数：申请中断时请求的vector个数
+  - ITT表的基地址：由OS来分配
+- ITT表项的内容由：
+  - 软件通过command queue来发送命令给硬件，硬件来完成
+  - 通过MAPD命令，把deviceID映射到ITT表中
+
+#### Collection Table的创建
+
+- Collection Table表项用来映射：**ICID -> redistributor**
+- **这个表不需要在内存中分配内存**
+
+
+
+- Collection Table表项的内容由：
+
+  - 软件通过command queue来发送命令给硬件，硬件来完成
+  - 软件告知：redistributor的物理地址或者GICR_TYPER.Processor_Number
+  - 通过MAPC命令来映射ICID -> redistributor
+  - 在GIC初始化的时候就遍历所有的redistributor，并且调用MAPC命令初始化
+
+  gic_smp_init()->
+
+  ​	遍历所有present CPU()->
+
+  ​		gic_starting_cpu()->
+
+  ​			its_cpu_init()->
+
+  ​				its_cpu_init_collections()->
+
+  ​					its_cpu_init_collection()->
+
+  ​						its_send_mapc()发送MAPC命令初始化collection table
+
+- Collection table的表项CTE
+
+![image-20251010135921573](running_linux_armv8.assets/image-20251010135921573.png)
+
+
+
+#### ITS Command Queue
+
+- 三个与command queue相关的寄存器
+  - GITS_CBASER：指定command queue的大小和基地，基地址必须64KB对齐，大小必须4KB整数倍
+  - GITS_CREADR：ITS下一条要处理的command
+  - GITS_CWRITER：下一条要写入的command
+- 常用的Command
+  - MAPD：映射device ID到ITT table中
+    - MAPD \<DeviceID\>, \<ITT_addr\>, \<size\>
+  - MAPI：映射eventid和deviceid以及硬件中断号到ITT中
+    - MAPI \<DeviceID\>, \<EventID\>,  \<Collection ID\>
+  - MAPTI：映射eventid,deviceid以及硬件中断号到ITT中
+    - MAPTI \<DeviceID\>, \<EventID\>, \<INTID\>, \<Collection ID\>
+  - MAPC：映射collection id到目标redistributor
+    - MAPC \<Collection ID\>, \<Target Redistributor\>
+
+
+
+![image-20251010113824599](running_linux_armv8.assets/image-20251010113824599.png)
+
+**例子**
+
+假设某个设备的Device ID为5，想把Event ID=0映射到物理中断号8192中，ITT表的基地址为0x850000。对应的Collection ID为3，对应的目标redistributor的物理地址为0x78400000
+
+![image-20251010114149986](running_linux_armv8.assets/image-20251010114149986.png)
+
+linux内核中喜欢用vector表示eventid
+
+#### ITS在Linux中的实现
+
+
+
+![image-20251010115024410](running_linux_armv8.assets/image-20251010115024410.png)
+
+
+
+##### irqdomain中断控制域
+
+- 系统存在多级中断控制器的可能性
+  - 传统中断控制器-GIC
+  - 可以抽象成中断控制器：GIC ITS，GPIO等
+  - 虚拟中断控制器，platform irqdomain
+- IRQ Domain看作是IRQ Controller的软件抽象
+
+
+
+![image-20251010115236509](running_linux_armv8.assets/image-20251010115236509.png)
+
+##### ITS驱动框架
+
+![image-20251010115535390](running_linux_armv8.assets/image-20251010115535390.png)
+
+![image-20251010115545982](running_linux_armv8.assets/image-20251010115545982.png)
+
+
+
+
+
+![image-20251010115730896](running_linux_armv8.assets/image-20251010115730896.png)
+
+##### 创建MSI中断的API
+
+![image-20251010115937979](running_linux_armv8.assets/image-20251010115937979.png)
+
+![image-20251010115959287](running_linux_armv8.assets/image-20251010115959287.png)
+
+##### Platform device中使用MSI中断的例子-SMMUv3
+
+![image-20251010120438448](running_linux_armv8.assets/image-20251010120438448.png)
+
+
+
+##### platform请求分配MSI中断流程图
+
+![image-20251010121655276](running_linux_armv8.assets/image-20251010121655276.png)
+
+
+
+##### PCI设备分配MSI中断流程图
+
+![image-20251010122629205](running_linux_armv8.assets/image-20251010122629205.png)
+
+![image-20251010122648639](running_linux_armv8.assets/image-20251010122648639.png)
+
+##### IO设备如何触发中断？
+
+对于GICv3中断控制来说，IO设备需要往GITS_TRANSLATER寄存器写入event ID，即可触发MSI中断
+
+![image-20251010134842066](running_linux_armv8.assets/image-20251010134842066.png)
+
+Linux内核封装了一个struct msi_msg数据结构，包括了这个寄存器的地址，以及将要写入的数据
+
+```c
+struct msi_msg{
+	u32 address_lo;
+	u32 address_hi;
+	u32 data;
+}
+```
+
+在irq_chip的ops有一个its_irq_compose_msi_msg回调函数，用来填充这个msi_msg，就是把GITS_TRANSLATER寄存器的物理地址写入到msi_msg->address字段里
+
+
+
+设备驱动程序在使用platform_msi_domain_alloc_irqs()注册MSI的时候，就会从msi_msg数据结构中获取到GITS_TRANSLATER寄存器的物理地址和eventID，然后写入到IO设备自己的寄存器（例如SMMU中的SMMU_EVENTQ_IRQ_CFGO和CFG1）里。
+
+
+
+设备要触发MSI，就会自动往自己寄存器里写入eventid，来触发中断。
+
+
+
+以SMMU为例：
+
+![image-20251010140250054](running_linux_armv8.assets/image-20251010140250054.png)
+
+##### ITS Debug Tips
+
+- 最新的qemu支持ITS。可以通过QEMU+linux kernel来单步调试ITS和MSI
+- 在kernel command line中添加"irq_gic_v3_its.dyndbg=+pflmt irqdomain.dyndbg=+pflmt"来打开相关的动态打印：
+
+![image-20251010135349580](running_linux_armv8.assets/image-20251010135349580.png)
+
+- 可以在its_domain_ops回调中添加"dump_stack()"来打印调用函数关系calltrace
+
+
+
+
+
+## SMMUv3控制器
+
+技术手册:
+
+1. System Memory Management Unit Architecture Specification, SMMU architecture version 3
+2. MMU-600 System Memory Mangement Unit, Technical Reference Manual
+
+
+
+### 什么是SMMU/IOMMU
+
+- SMMU是ARM公司实现的IOMMU（Input/Output Memory Management Unit）,把设备访问的虚拟地址转换成物理地址
+- AMD公司IOMMU
+- Intel VD-T
+
+![image-20251010140709180](running_linux_armv8.assets/image-20251010140709180.png)
+
+#### Bare-mental OS场景
+
+![image-20251010140803411](running_linux_armv8.assets/image-20251010140803411.png)
+
+IO设备的DMA访问可能会有问题：
+
+1. IO设备得到的是物理地址，它可以访问所有的内存地址。所以DMA可以破坏其他的设备或者系统内存，例如恶意的IO设备。
+2. 对设备驱动程序也没有做保护，例如恶意的驱动程序
+3. IO设备与IO设备之间容易泄露信息：Side channel attack
+
+#### 虚拟化场景
+
+![image-20251010141153916](running_linux_armv8.assets/image-20251010141153916.png)
+
+缺点：
+
+每次DMA操作都需要陷入到VMM，来分配物理内存for IO设备，会有性能损失（约20~30%）
+
+#### 解决方案：SMMU
+
+![image-20251010141319417](running_linux_armv8.assets/image-20251010141319417.png)
+
+每个IO设备有自己的页表
+
+scatter-gather表示IO设备可以使用一段连续的虚拟地址，但最终翻译的物理地址不一定需要连续
+
+#### SMMU发展历史
+
+![image-20251010141530015](running_linux_armv8.assets/image-20251010141530015.png)
+
+### SMMU的使用
+
+![image-20251010141624127](running_linux_armv8.assets/image-20251010141624127.png)
+
+CPU访问设备，使用MMU即可，设备访问Memory需要经过SMMU
+
+### MMU-600控制器
+
+- SMMUv3是spec，MMU-600是基于SMMUv3.1规范实现的控制器
+- MMU-600转换设备IOVA到PA，支持2阶段的地址转换或者Bypass模式
+  - Stage1：转换IOVA->PA或者IOVA->IPA
+  - Stage2：IPA->PA
+  - Both: IOVA->IPA->PA
+  - Bypass 模式（略过SMMU）
+- 特性
+  - 兼容SMMUv3.1
+  - 支持ARMv8的AArch32和AArch64的页表格式
+  - 支持4KB，16KB，64KB页
+  - 支持PCIe，支持ATS和PASIDs
+  - 支持RPI（Page Request Interface）
+  - 支持ACE5-Lite原子操作
+  - 支持translation fault，软件可以实现请求调页
+  - 支持GICv3集成，支持message-based中断
+
+#### MMU-600框图
+
+![image-20251010142633450](running_linux_armv8.assets/image-20251010142633450.png)
+
+#### MMU-600内部组成
+
+- **TBU (Translation Buffer Unit)**
+  - 包含TLB用来缓存转换结果
+  - 每个连接的Master至少有一个TBU
+  - 如果TBU没有找到TLB表项，那么发送请求给TCU
+- **TCU（Translation Control Unit）**
+  - 进行地址转换的硬件单元
+  - MMU-600只有一个TCU
+  - 管理内存请求
+  - 遍历页表
+  - 执行配置页表
+  - Implements backup caching structures
+  - SMMU编程接口
+- **DTI**
+  - 用来连接TBU到TCU
+  - 使用AXI Stream协议
+
+![image-20251010143054381](running_linux_armv8.assets/image-20251010143054381.png)
+
+
+
+### StreamID
+
+- 一次DMA传输包括：目标地址，大小，读写属性，安全属性，共享属性，缓存属性，以及StreamID
+- StreamID用来关联一个设备(function)
+- StreamID用来索引Stream Table，Stream Table包含per-SMMU相关的页表信息
+- 对于PCIe设备，StreamID[15:0]==RequesterID[15:0]等于BDF
+  - Bits[15:8] Bus number
+  - Bits[7:3]   Device number
+  - Bits[2:0]   Function number
+- 对于非PCIe设备，通过DTS来获取StreamID（因此streamID是定死的）
+
+![image-20251010143601598](running_linux_armv8.assets/image-20251010143601598.png)
+
+
+
+### 遍历Stream Table
+
+- Stream Table中的每个表项STE包含了：
+  - Stage2转换的页表基地址
+  - 指向一个Context Descriptors，里面包含了stage1的转换页表基地址
+- 使用StreamID来索引Stream Table
+- Stream Table需要OS软件来创建和填充
+- STE（Stream Table Entry）数量大于64，必须使用2级表
+- streamID[n:x]索引第一级表，streamID[x-1:0]索引第二级表
+  - N表示streamID的最高位，通常为15
+  - X是split点，STRTAB_BASE_CFG.SPLIT
+  - 例如：n=15,x=8，那么StreamID[15:8]索引第一级表，StreamID[7:0]索引第二级表
+
+![image-20251010144047294](running_linux_armv8.assets/image-20251010144047294.png)
+
+### 二级表例子
+
+![image-20251010144643297](running_linux_armv8.assets/image-20251010144643297.png)
+
+假设StreamID只有10位，即StreamID[9:0]，假设x为8，那么使用StreamID[9:8]来索引第一级表，使用StreamID[7:0]来索引第二级表
+
+一级表有4个表项，每个二级表有256个表项
+
+StreamID共10bit，2^10次方是1024，也就说最多索引0~1023个STE
+
+
+
+### Context Descriptors表
+
+- CD包含stage1的页表基地址，ASID，页表属性等
+
+- STE中的S1ContexPtr指向CD
+
+- Stage2的页表基地址是在STE
+
+- 软件管理：
+
+  - 虚拟化：Hypervisor管理Stream Table和stage 2页表，Guest OS管理CD和stage1页表
+  - Bare-metal OS管理Stream Table和CD
+
+  ![image-20251010145258201](running_linux_armv8.assets/image-20251010145258201.png)
+
+  ### SubstreamID
+
+  ![image-20251010151932375](running_linux_armv8.assets/image-20251010151932375.png)
+
+- STE中的S1ContextPtr指向一个CD（Context Descriptor）表，SubstreamID用来索引这个表
+- 每个CD里都包含了stage1中要用的页表基地址
+- 一个设备可能被多个进程使用，SMMU通过substream id来进行区分，可以每个进程一个substreamID
+- 对于PCIe设备，使用PASID作为SubstreamID
+
+**总结**
+
+![image-20251010152206255](running_linux_armv8.assets/image-20251010152206255.png)
+
+### Command and Event queues
+
+- command queue用于输入，event queue用于输出。每个queue都有生产者和消费者
+- 输出队列包含由SMMU产生的数据，然后由软件来消费。输入queue是由软件产生数据，然后SMMU来消费
+
+![image-20251010152440653](running_linux_armv8.assets/image-20251010152440653.png)
+
+![image-20251010152450552](running_linux_armv8.assets/image-20251010152450552.png)
+
+具体每个CMD描述，见SMMUv3手册第四章
+
+### Linux IOMMU驱动框架
+
+IOMMU驱动两大作用：
+
+1. 为IO设备提供DMA接口和功能
+2. 为IO设备提供SVA功能（Shared Virtual Addressing），把IO的设备和某个进程共享虚拟地址空间
+
+
+
+IOMMU包括：
+
+1. IOMMU framework
+2. IOMMU 控制器驱动
+3. IOMMU dma-mapping
+4. IOMMU 提供给IO设备的接口
+
+
+
+![image-20251010153233504](running_linux_armv8.assets/image-20251010153233504.png)
+
+- IOMMU Domain主要是用来提供访问IOMMU控制器的能力
+- iommu_group是最小资源隔离单元
+  - 一般一个设备占用一个iommu_group，基于某种硬件拓扑关系并且安全信任的多个设备或者点对点保护的传输设备，可以添加到一个iommu group
+- 服务器系统可能由多个IOMMU控制器
+
+![image-20251010154859495](running_linux_armv8.assets/image-20251010154859495.png)
+
+![image-20251010154847947](running_linux_armv8.assets/image-20251010154847947.png)
+
+![image-20251010154957765](running_linux_armv8.assets/image-20251010154957765.png)
+
+### IOMMU domain与SMMU控制器之间的桥梁- iommu_ops
+
+![image-20251010155107989](running_linux_armv8.assets/image-20251010155107989.png)
+
+### SMMU驱动:DMA
+
+![image-20251010155256497](running_linux_armv8.assets/image-20251010155256497.png)
+
+### 编写一个IOMMU的IO设备驱动
+
+#### 手动设置
+
+- 分配一个IOMMU domain
+
+```c
+domain = iommu_domain_alloc()
+```
+
+- 把设备dev加入到iommu domain里
+
+```c
+iommu_attach_device(domain, dev)
+```
+
+- 建立映射
+
+```c
+iommu_map()
+```
+
+![image-20251010155430373](running_linux_armv8.assets/image-20251010155430373.png)
+
+#### 自动设置
+
+- 对于PCI设备或者Platform device，通过总线扫描的方式自动检测和初始化IOMMU
+
+driver_probe_device()->
+
+​	dev->bus->dma_configure(dev)->
+
+​		platform_dma_configure()/pci_dma_configure()->
+
+​				of_dma_configure()
+
+
+
+- 自动设置struct dma_map_ops *dma_ops为IOMMU的
+
+对于PCI和platform device可以使用DMA API接口，例如dma_map_page()
+
+of_dma_configure()->
+
+​	arch_setup_dma_ops()->
+
+​		dev->dma_ops = &iommu_dma_ops;
+
+
+
+- arch/arm64/mm/dma-mapping.c
+
+![image-20251010155843704](running_linux_armv8.assets/image-20251010155843704.png)
+
+### IO设备SMMU初始化流程
+
+![image-20251010160032735](running_linux_armv8.assets/image-20251010160032735.png)
+
+**总结**
+
+![image-20251010160645080](running_linux_armv8.assets/image-20251010160645080.png)
+
+### SVA（Shared Virtual Addressing）
+
+进程和设备之间共享进程地址空间
+
+（以Linux5.15内核为参考）
+
+#### 为什么要SVA
+
+**传统的DMA模式**
+
+![image-20251010161758266](running_linux_armv8.assets/image-20251010161758266.png)
+
+**SVA模式**
+
+![image-20251010161907298](running_linux_armv8.assets/image-20251010161907298.png)
+
+
+
+DMA模式下在CPU和GPU/FPGA/加速卡之间很难共享一些复杂度数据结构
+
+![image-20251010162049697](running_linux_armv8.assets/image-20251010162049697.png)
+
+#### Linxu SVA框架
+
+![image-20251010162151190](running_linux_armv8.assets/image-20251010162151190.png)
+
+
+
+
+
+#### 从驱动角度看新增哪些API接口
+
+![image-20251010162429078](running_linux_armv8.assets/image-20251010162429078.png)
+
+
+
+**总结**
+
+![image-20251010162823013](running_linux_armv8.assets/image-20251010162823013.png)
+
+
+
+#### IO缺页异常
+
+- CPU侧的缺页异常，走CPU的缺页异常，handle_mm_fault
+- 设备侧的缺页异常：
+  - PCIe设备：PRI扩展（Page Request Interface）
+  - 平台设备：利用SMMU的stall模式
+- Stall模式：当IO设备触发异常时，传输事务被暂停，把这个事件记录在even queue里。OS软件需要处理，然后发送CMD_RESUME命令恢复传输事务。
+
+
+
+![image-20251010163333032](running_linux_armv8.assets/image-20251010163333032.png)
+
+疑问：为什么这里IO设备侧发生缺页异常处理，调用CPU侧的handle_mm_fault()来建立VA->PA的页表项，那IO设备的页表呢？谁来建立？
+
+SVA，共用一套页表
+
+
+
+#### 无效TLB操作
+
+![image-20251010171306116](running_linux_armv8.assets/image-20251010171306116.png)
+
+- 当CPU侧修改了mm，或者释放内存
+  - 调用flush_tlb()来无效CPU侧的TLB
+  - 通过mmu_notifier注册的回调函数来无效IO设备侧对应的IOTLB以及PCIe ATC的IOTLB
+
+![image-20251010164207714](running_linux_armv8.assets/image-20251010164207714.png)
+
+- IO设备有没有可能主动修改了VA->PA的映射关系？
+  - 非SVA情况下，通过iommu_map和iommu_umap接口来实现分配和释放DMA buffer。iommu_unmap()->iotlb_sync()
+  - SVA情况下，CPU侧分配的虚拟地址就可以当作IOVA。当IO设备触发缺页异常时，就直接走IO缺页异常处理流程。
+
+
+
+### PCIe新增的ATS（Address Translation Services）
+
+![image-20251010171354383](running_linux_armv8.assets/image-20251010171354383.png)
+
+- PCIe中ATS机制：设备中缓存VA对应PA，设备使用pa做内存访问时无需经过IOMMU页表转换
+- PCIe设备的ATC（Address Translation Cache）有自己的TLB
+- 设备做DMA前，查询ATC是否有VA对应的entry
+  - 有：直接用PA访问内存
+  - 无：发送ATS request到SMMU，SMMU找到PA之后，回复ATS completion
+- PCIe ATS规范定义了ATS request和completion message包的格式
+  - Address Translation Services Revision 1.1
+- SMMU驱动：
+  - Enable ATS
+  - ATS invalidation操作。当SMMU改变了VA->PA时，SMMU需要发送ATS invalidation request到PCIe的ATC
+  - SMMU提供CMD_ATC_INV命令
+
+
+
+
+
+![image-20251010172013660](running_linux_armv8.assets/image-20251010172013660.png)
+
+
+
+### PRI（Page Request Interface）支持
+
+- PRI机制的好处是在准备发起DMA操作的时候，不需要提前把DMA Buffer准备好（pinned）
+- 使用场景：高速网卡，在burst情况下，Host不需要提前预留和占用大量的buffer
+- PRI机制：
+  - 当ATC查找TLB miss，发送Page Request Message
+  - RC把message发送到SMMU
+  - SMMU缺页请求写入PRI queue，触发PRI中断
+  - OS软件申请物理内存
+  - OS软件回复CMD_PRI_RESP命令
+
+
+
+![image-20251010172538668](running_linux_armv8.assets/image-20251010172538668.png)
+
+## AXI总线
+
+文档：AMBA AXI and ACE Protocol Specificationi, issue H, part A & Part E
+
+### AMBA总线发展历史
+
+**AXI总线的应用**
+
+
+
+![image-20251011114248709](running_linux_armv8.assets/image-20251011114248709.png)
+
+**AMBA总线发展历史**
+
+![image-20251011114351400](running_linux_armv8.assets/image-20251011114351400.png)
+
+### AXI基本概念：通道，传输，事务
+
+#### 什么是总线
+
+- 总线由单个或者一组信号组成，传输数据或者控制信息
+
+- 在总线上，发送方按协议规定的高点电平组合编码发送信息，接收方再解码
+
+- 外部总线和内部总线
+
+  - 外部总线连接外围设备，可能外界干扰，连接器，PCB的损耗，信号完整性差
+
+  I2C，UART，SPI，PCIe，USB
+
+  - 内部总线用于SOC内部，在芯片内部走线，距离极短，很多干扰和信号完整性问题不需要考虑
+
+  AXI，UPI（intel）
+
+- 并行总线与串行总线
+
+  - 并行：多个数据同时传输，需要考虑数据的协同性，导致了并行传输的频率不能做的很高，容易干扰
+  - 串行：只有一条链路，把频率做的很高，提高传输速度
+
+![image-20251011115214008](running_linux_armv8.assets/image-20251011115214008.png)
+
+#### AXI总线的特点
+
+- AXI总线是一个芯片内部的同步串行总线
+- AXI总线的优点
+  - 高性能：高带宽（high-bandwidth）,低延时（low-latency）,高频率（High-frequency）
+  - 可灵活扩展总线位宽以及拓扑连接
+  - 兼容AHB和APB总线
+- AXI总线的特点
+  - 独立的地址/控制和数据通道（seprate read & write channel）
+  - 支持burst传输
+  - 支持超前传输（multiple outstanding addresses）
+  - 在发送地址和数据阶段之间没有严格的时序要求（no strict timing between address and data phases）
+  - 支持乱序传输（out-of-order transaction completion）
+  - 支持非对齐数据传输（support unaligned data transfer）
+
+
+
+#### AXI拓扑
+
+**AXI使用主从机制**
+
+- 由master发起请求
+- slave对请求进行应答
+
+
+
+![image-20251011120444262](running_linux_armv8.assets/image-20251011120444262.png)
+
+![image-20251011120513349](running_linux_armv8.assets/image-20251011120513349.png)
+
+#### AXI通道
+
+AXI定义了5个独立的传输通道（channel），提升bandwidth
+
+1. 读地址通道：AR
+2. 读数据通道：R
+3. 写地址通道：AW
+4. 写数据通道：W
+5. 写回应通道：B
+
+每个channel不止一根信号线，而是一组信号线
+
+![image-20251011121446597](running_linux_armv8.assets/image-20251011121446597.png)
+
+
+
+#### 写传输事务
+
+- 地址通道包含传输控制信息
+- 传输事务步骤：
+  - Master通过write address channel发起写传输，包括地址和控制信息
+  - Master通过write data channel写数据给slave
+  - Slave通过write response channel回应
+
+![image-20251011121734142](running_linux_armv8.assets/image-20251011121734142.png)
+
+#### 读传输事务
+
+- Master通过read address channel发送地址和控制信息给slave
+- Slave通过read data channel返回数据，回应信息包含在返回数据里
+
+![image-20251011122210015](running_linux_armv8.assets/image-20251011122210015.png)
+
+
+
+#### 握手信号（Handshake process）
+
+- 5个channel都使用相同的握手信号：VALID/READY handshake process
+- source端产生VALID信号表明地址，数据，控制信息等已经ready了
+- destination端产生READY信号表明它开始接受信息了。
+
+![image-20251011122430648](running_linux_armv8.assets/image-20251011122430648.png)
+
+只有READY和VALID信号同时有效时才握手
+
+![image-20251011122549042](running_linux_armv8.assets/image-20251011122549042.png)
+
+#### 传输transfer和事务transaction的区别
+
+**Transfer**
+
+只有一次的握手过程，传输一次数据
+
+![image-20251011122740449](running_linux_armv8.assets/image-20251011122740449.png)
+
+**transaction**
+
+**有多次的握手信号，由多次的transfer来组成**
+
+以write为例，通过write address channel传递地址和控制信息。然后通过write data channel来传输数据。最后通过write response channel来回应。
+
+一共有3个transfer
+
+![image-20251011122958070](running_linux_armv8.assets/image-20251011122958070.png)
+
+#### 例子：Write transaction: single data item
+
+![image-20251011123120307](running_linux_armv8.assets/image-20251011123120307.png)
+
+#### 例子：Read transaction：single data item
+
+![image-20251011125902378](running_linux_armv8.assets/image-20251011125902378.png)
+
+#### 例子：Read transaction：multiple data items
+
+![image-20251011130022469](running_linux_armv8.assets/image-20251011130022469.png)
+
+#### 通道信号和事务结构
+
+##### **写地址通道（write address channel）的信号线**
+
+![image-20251011130156266](running_linux_armv8.assets/image-20251011130156266.png)
+
+##### **写数据通道（write data channel）的信号线**
+
+![image-20251011130238140](running_linux_armv8.assets/image-20251011130238140.png)
+
+##### **写回应通道（write response channel）的信号线**
+
+![image-20251011130317420](running_linux_armv8.assets/image-20251011130317420.png)
+
+##### **读地址通道（read address channel）的信号线**
+
+![image-20251011130427312](running_linux_armv8.assets/image-20251011130427312.png)
+
+##### **读数据通道（read data channel）的信号线**
+
+![image-20251011130457673](running_linux_armv8.assets/image-20251011130457673.png)
+
+##### Transaction structure
+
+- 一次burst中包括多少个传输transfer
+  - AXI3最多包含16个transfer：Burst_Length = AxLEN[3:0] + 1
+  - AXI4最多包含256个transfers：Burst_Length = AxLEN[7:0] + 1
+- AxSIZE：表示一个transfer传递多少个字节，最大128个字节
+
+![image-20251011131144768](running_linux_armv8.assets/image-20251011131144768.png)
+
+- AxBURST：表示burst类型
+
+  - FIXED：固定地址模式，应用于FIFO
+
+  - INCR：地址递增模式，应用于RAM
+
+    ​	slave递增地址，支持1~256个transfers，支持unaligned transfer
+
+  - WRAP：地址递增，达到上限后绕回，应用于Cache
+
+![image-20251011131201598](running_linux_armv8.assets/image-20251011131201598.png)
+
+
+
+##### 访问权限（Access permissions）
+
+- ARPROT[2:0]：表示读事务的访问权限
+- AWPROT[2:0]：表示写事务的访问权限
+
+![image-20251011131342053](running_linux_armv8.assets/image-20251011131342053.png)
+
+##### 高速缓存的支持
+
+- 传输过程中可以利用各种缓存
+  - 系统各级高速缓存，例如L2/L3 cache
+  - 系统总线内部的缓存（with the iterconnect）
+- AxCACHE[3:0]：表示高速缓存属性
+
+![image-20251011131724554](running_linux_armv8.assets/image-20251011131724554.png)
+
+##### 回应包(response structure)
+
+- RRESP[1:0]，for read transfers
+- BRESP[1:0]，for write transfers
+
+
+
+- OKAY：表示normal access成功或者exclusive access has failed
+- EXOKAY：表示exclusive access成功
+- SLVERR：slave error
+- DECERR：解码错误
+
+![image-20251011132056042](running_linux_armv8.assets/image-20251011132056042.png)
+
+
+
+##### Write strobes
+
+- WSTRB[n:0]：表示WDATA上的数据是否有效，一个bit表示一个字节
+- 主要是为了支持不对齐访问
+
+![image-20251011132254458](running_linux_armv8.assets/image-20251011132254458.png)
+
+##### QoS信号
+
+- AXI总线提供额外的信号线来支持quality of service
+- AWQOS：4-bit QoS，在每个写事务的write address channel中
+- AWQOS:   4-bit QoS,  在每个读事务的read address channel中
+- 0表示最低优先级，F表示最高优先级
+- 一般系统总线IP提供寄存器来配置每个master的QoS
+
+
+
+##### 通道依赖关系
+
+- 依赖关系1：在AWVALID有效之前，WVALID先设置有效
+  - AWVALID表示write address channel有效
+  - WVALID表示write data channel有效
+  - **写地址有效之前，可以先把数据发送出去**
+- 依赖关系2：在BVALID有效之前，必须发送WLAST
+  - BVALID表示write response channel有效
+  - WLAST表示时事务中最后一个transfer
+  - **在写回应包发送之前，所有的写data和地址address必须发送完成**
+- 依赖关系3：在ARADDR发送完成之前，RVALID不能有效
+  - ARADDR表示读事务的第一个transfer的地址
+  - RVALID表示read data channel有效
+  - **如果地址没有发送完成，不应该看到有读数据返回**
+
+
+
+### lock access and exclusive access
+
+#### Locked accesses
+
+- Locked access只在AXI 3协议中，AXI 4已经遗弃
+- AXI 3和AXI 4里有AxLOCK信号线
+- AXI 3中，Locked access类似锁住总线
+
+
+
+![image-20251011133452170](running_linux_armv8.assets/image-20251011133452170.png)
+
+![image-20251011133503522](running_linux_armv8.assets/image-20251011133503522.png)
+
+![image-20251011133513233](running_linux_armv8.assets/image-20251011133513233.png)
+
+#### Exclusive access
+
+- Exclusive access 比 Locked access 更高效，不需要锁住总线，其他master可以同时访问总线
+- 需要在slave端实现exclusive monitor来协同完成exlusive access
+- **ARID** 读事务的ID
+- **AWID** 写事务的ID
+
+
+
+- 访问流程
+  1. master发起exclusive读。Slave的exclusive monitor把ARID，地址以及数据填入到表里面。
+  2. master对同一个地址发起exclusive写操作。exclusive monitor查表并比较AWID和ARID是否一致
+  3. 回应
+     - EXOKAY（成功），如果这期间没有其他master对这个地址进行写入，那么exclusive写操作就成功
+     - OKAY（失败），如果这个期间有其他master对这个地址进行写入，那么exclusive写失败
+
+
+
+#### 例子：独占访问失败
+
+操作序列：
+
+1. Master往0x8000地址发起第1次的exclusive read操作
+2. Master往0x8000地址发起第2次的exclusive read操作
+3. Master往0x8000地址exclusive地写入0x3->成功
+4. Master往0x8000地址exclusive地写入0x5->失败
+
+
+
+![image-20251011135826149](running_linux_armv8.assets/image-20251011135826149.png)
+
+前三步操作：
+
+![image-20251011135900220](running_linux_armv8.assets/image-20251011135900220.png)
+
+Exclusive write时有相同ID的读事务，所以写入成功
+
+当exclusive write成功之后，独占监视器会把这个地址和ID相关的所有entry从这个table里删掉
+
+![image-20251011140113869](running_linux_armv8.assets/image-20251011140113869.png)
+
+
+
+Exclusive Write时查表时没有相同ID的读事务，所以失败
+
+### 事务的次序transaction ordering
+
+#### AXI transaction ID
+
+- AXI为每个事务通道有一个独立事务ID
+- 所有的transfer必须有一个ID
+- 在同一个事务的transfer有相同的ID
+- 事务ID是为了out-of-order
+
+![image-20251011140429069](running_linux_armv8.assets/image-20251011140429069.png)
+
+#### 写事务次序规则
+
+- 写事务次序规则1：在write data channel写数据的次序必须和write address channel中的地址传输次序一致（data must follow the same order as address transfers）
+
+![image-20251011140626113](running_linux_armv8.assets/image-20251011140626113.png)
+
+在write address channel是先发送A地址，然后再发送B地址，所以在write data cache中，先发送A数据，然后再发送B的数据
+
+- 写事务规则2：不同ID的写事务之间可以任意次序完成（data for different transation IDs can be interleaved）
+
+![image-20251011140923727](running_linux_armv8.assets/image-20251011140923727.png)
+
+事务B比事务A先完成，尽管事务A比事务B先执行
+
+- 写事务规则3：相同ID的写事务，按照顺序执行和按照顺序完成(data with the same ID must follow in the order as issued)
+
+![image-20251011141101806](running_linux_armv8.assets/image-20251011141101806.png)
+
+事务B和事务A，C的ID不同，事务B可以任意次序完成。事务A和C使用相同的ID，那么必须事务A先完成，然后才是事务C
+
+#### 读事务次序规则
+
+- 读事务次序规则1：在read data channel不同的ID的事务可以任意次序（data for different IDs has no ordering restrictions）
+
+![image-20251011141349297](running_linux_armv8.assets/image-20251011141349297.png)
+
+尽管在read address channel中事务B比事务A晚发送地址，但是，事务B可以比事务A先读取数据
+
+- 读事务规则2：不同ID的事务的传输在read data channel可以交织地读（data with different transaction IDs can be interleaved）
+
+![image-20251011141628065](running_linux_armv8.assets/image-20251011141628065.png)
+
+事务A和事务B交织地读数据
+
+- 读事务规则3：相同ID的读事务必须按照顺序完成（data with same ID must follow in the order as issued）
+
+![image-20251011141756085](running_linux_armv8.assets/image-20251011141756085.png)
+
+事务A和C有相同的ID，事务A比事务C先发送，那么事务A也必须比事务C先完成
+
+
+
+### 非对齐地址访问
+
+- AXI总线支持非对齐地址访问，使用byte strobes机制
+
+
+
+![image-20251011142017049](running_linux_armv8.assets/image-20251011142017049.png)
+
+从0x1地址开始，先传输3个字节，随后就对齐了地址
+
+### AXI-Lite总线
+
+#### AXI4-Lite总线介绍
+
+- AXI4-Lite不支持burst模式，或者burst长度为1
+- AXI4-Lite支持数据位宽32bit或者64bit
+- AXI4-Lite所有访问都是Non-modifiable，Non-bufferable
+- 不支持exclusive access
+
+#### AXI5-Lite总线介绍
+
+- AXI5-Lite在AXI4-Lite基础上放宽了数据位宽和事务传输次序的要求
+- AXI5-Lite的特点
+  - 不支持burst模式，或者burst长度为1
+  - 所有访问都是Device and Non-bufferable
+  - 不支持exclusive access
+  - 当请求具有不同的id时，允许对响应进行重排序
+
+![image-20251011142655225](running_linux_armv8.assets/image-20251011142655225.png)
+
+### AXI5/ACE5新增的功能
+
+![image-20251011142831546](running_linux_armv8.assets/image-20251011142831546.png)
+
+### 总结
+
+- AXI总线定义了5个独立的通道，每个通道由一组信号线组成
+- AXI总线定义了传输事务的数据结构和属性
+  - Burst的数量
+  - Transfer的大小
+  - Burst类型
+  - 回应包
+  - 高速缓存支持
+  - 访问全新啊
+  - QoS信号
+- 支持exclusive access
+- 通过事务ID来支持乱序传输
+- 支持非对齐访问
+
+
+
+## ACE总线
+
+### ACE介绍
+
+- ACE（AXI Coherency Extensinos）是基于AXI总线的硬件缓存一致性解决方案
+- 关注系统级的缓存一致性
+
+![image-20251011145640614](running_linux_armv8.assets/image-20251011145640614.png)
+
+### 最早是从大小核架构的Cortex-A15/A7开始支持ACE接口
+
+![image-20251011145855243](running_linux_armv8.assets/image-20251011145855243.png)
+
+Cortex-A9不支持ACE接口，通过AXI接口连接到L2和Memory
+
+![image-20251011145930900](running_linux_armv8.assets/image-20251011145930900.png)
+
+Cortex-A15支持ACE接口，大小核架构下，大cluster和小cluster通过ACE连接到CCI总线上
+
+![image-20251011151439440](running_linux_armv8.assets/image-20251011151439440.png)
+
+- 三个master,都有本地cache。ACE允许对同一个内存地址这三个master都有相同的cache拷贝
+- 这里master一般指的是CPU cluster或者具有cache的控制器
+- ACE保证对一个给定的地址，所有master都能访问到正确的数据
+
+![image-20251011151638156](running_linux_armv8.assets/image-20251011151638156.png)
+
+ACE关注带cache的master之间的系统缓存一致性问题，例如Cortex-A72族与Cortex-A53族
+
+ACE-Lite用于连接不带cache的硬件IO设备，但是这些设备需要访问系统缓存一致性的内存，例如GPU，SMMU等，DVM interface用于broadcast TLB invalidation
+
+### ACE实现的基本思路
+
+- 需要实现一种snoop机制来保证多个master的cache一致性
+  - 在AXI的基础上新增信号线以及新的传输事务来实现snooping
+  - 在AXI基础上新增新的传输通道
+  - 实现5个state的cache状态转换机制（因为有的master使用MESI有的master使用MOESI等）
+- ACE支持memroy barrier（ACE5移除）
+- ACE支持exclusive access
+- ACE支持DVM
+
+
+
+### ACE的状态机
+
+- valid：cache line有效
+- invalid：cache line无效
+
+
+
+- unique：表示这个cache line是独占，只有当前master有
+- shared：多个master都有这个cache line的拷贝
+
+
+
+- clean：表示cache line的内容和内存一致
+- dirty：cache line的内容和内存不一致，需要稍后写回到内存
+
+![image-20251011155045624](running_linux_armv8.assets/image-20251011155045624.png)
+
+类似MOESI协议
+
+![image-20251011155140812](running_linux_armv8.assets/image-20251011155140812.png)
+
+
+
+### ACE新增的channel
+
+![image-20251011155427117](running_linux_armv8.assets/image-20251011155427117.png)
+
+### ACE新增的信号
+
+![image-20251011155501119](running_linux_armv8.assets/image-20251011155501119.png)
+
+- AxDOMAIN：用来指示shareability domain:
+  - Nono-shareable，Inner Shareable，Outer Shareable，System
+- AxSNOOP：用来指示snoop传输事务类型
+- AxBAR：表示发起一个barrier事务（ACE5移除）
+- AWUNIQUE：用于优化写传输事务的cache状态转换
+
+
+
+#### AxDOMAIN信号线
+
+![image-20251011155848317](running_linux_armv8.assets/image-20251011155848317.png)
+
+![image-20251011155929994](running_linux_armv8.assets/image-20251011155929994.png)
+
+#### AxSNOOP信号线
+
+![image-20251011160043872](running_linux_armv8.assets/image-20251011160043872.png)
+
+- AxSNOOP：用来指示snoop传输事务类型
+  - Non-snooping
+  - Coherent
+  - Memory update
+  - Cache维护
+  - DVM
+  - barrier
+
+
+
+![image-20251011160305727](running_linux_armv8.assets/image-20251011160305727.png)
+
+![image-20251011160318893](running_linux_armv8.assets/image-20251011160318893.png)
+
+#### shareability domains
+
+- 在发起coherency或者barrier传输事务之前，master用来确定这些事务传输应该发送给哪些master
+
+  - Coherent事务：确定哪些master可能有这个数据的拷贝，用来发送snoop事务
+  - Barrier事务：确定与哪些master会建立排序的关系，以及barrier事务要传播到多远
+
+- 支持4种shareability域：
+
+  - Non-shareable：仅仅包含一个master
+  - Inner Shareable
+  - Outer Shareable
+  - System
+
+  ![image-20251011160710523](running_linux_armv8.assets/image-20251011160710523.png)
+
+  
+
+![image-20251011160653072](running_linux_armv8.assets/image-20251011160653072.png)
+
+
+
+- Inner share：通常是指CPU内部集成的高速缓存，它们最靠近处理器核心，例如Cortex-A72核心内部可以集成L1和L2高速缓存
+- Outer share：通过系统总线扩展的高速缓存，例如连接到系统总线上的扩展L3高速缓存
+
+![image-20251011160806879](running_linux_armv8.assets/image-20251011160806879.png)
+
+
+
+![image-20251011161019065](running_linux_armv8.assets/image-20251011161019065.png)
+
+
+
+### Snoop事务
+
+![image-20251011163214005](running_linux_armv8.assets/image-20251011163214005.png)
+
+
+
+### 例子1：shareable read and miss
+
+![image-20251011163814132](running_linux_armv8.assets/image-20251011163814132.png)
+
+![image-20251011163833395](running_linux_armv8.assets/image-20251011163833395.png)
+
+最终：
+
+![image-20251011163848844](running_linux_armv8.assets/image-20251011163848844.png)
+
+### 例子2：shareable read and hit
+
+![image-20251011164034247](running_linux_armv8.assets/image-20251011164034247.png)
+
+![image-20251011164054890](running_linux_armv8.assets/image-20251011164054890.png)
+
+![image-20251011164103978](running_linux_armv8.assets/image-20251011164103978.png)
+
+### 例子3：shareable write 1（full cache line）
+
+![image-20251011164452476](running_linux_armv8.assets/image-20251011164452476.png)
+
+![image-20251011164603127](running_linux_armv8.assets/image-20251011164603127.png)
+
+![image-20251011164636205](running_linux_armv8.assets/image-20251011164636205.png)
+
+![image-20251011164651199](running_linux_armv8.assets/image-20251011164651199.png)
+
+### 例子4：shareable write 2（partial cache line）
+
+![image-20251011164733877](running_linux_armv8.assets/image-20251011164733877.png)
+
+
+
+![image-20251011164924795](running_linux_armv8.assets/image-20251011164924795.png)
+
+
+
+![image-20251011165102131](running_linux_armv8.assets/image-20251011165102131.png)
+
+![image-20251011165110670](running_linux_armv8.assets/image-20251011165110670.png)
+
+### 例子5：同时发起ReadUnique写操作
+
+1. T0时刻Master0和Master1的cache line状态都是I，地址A的初始化值为0x11223344
+2. T时刻, Master0和Master1同时发起对地址A写入操作
+   - Master0想对地址A写入：0x555667788
+   - Master1想对地址写入：0xaabbccdd
+
+![image-20251011173901158](running_linux_armv8.assets/image-20251011173901158.png)
+
+总线会做一个仲裁，处理完一个的请求后再去处理另外一个
+
+![image-20251011173945197](running_linux_armv8.assets/image-20251011173945197.png)
+
+![image-20251011174011520](running_linux_armv8.assets/image-20251011174011520.png)
+
+![image-20251011174044014](running_linux_armv8.assets/image-20251011174044014.png)
+
+### RACK和WACK信号线
+
+- 在例子5中使用了RACK信号线：表示ReadUnique事务已经完成
+- 在AXI总线上，支持多个outstanding的传输和乱序传输，不过在ACE中，很有可能会出现cache一致性问题
+- RACK信号线用来表示一个读事务已经完成
+- WACK信号线用来表示一个写事务已经完成
+- 互联总线IP使用RACK/WACK信号线来保证，**之前对一个地址的传输事务已经处理完成才能给其他master发送其他transaction的snooping**
+- 对于读transcation，当RLAST信号拉高之后表明最后一个读transfer完成，然后master才能发送一个read acknowledge信号
+- 对于写transcation，当write response channel发送response握手之后，master才能发送WACK信号
+
+
+
+### 例子6：RACK信号线的使用-问题引入
+
+T0时刻：Master0和Master1的cache line状态都是SC
+
+T1时刻：Master0想对地址A数据改写为：0xAABBCCDD
+
+T2时刻：Master1对地址A进行读操作
+
+
+
+![image-20251011180808853](running_linux_armv8.assets/image-20251011180808853.png)
+
+
+
+
+
+![image-20251011180842812](running_linux_armv8.assets/image-20251011180842812.png)
+
+![image-20251011180912049](running_linux_armv8.assets/image-20251011180912049.png)
+
+![image-20251011180925501](running_linux_armv8.assets/image-20251011180925501.png)
+
+**Root Cause**
+
+Master1发起ReadShared事务的时候，master1以为前面的master0的MakeUnique事务已经完成了，但是实际上它是blocking在某个中间的状态，还没有完成
+
+
+
+### 例子6：RACK信号线的使用-问题解决
+
+Solution：Master0使用RACK信号来告诉总线IP：MakeUnique事务已经完成了，总线才能发起其他的snoop相关的事务
+
+![image-20251011181230167](running_linux_armv8.assets/image-20251011181230167.png)
+
+![image-20251011181245722](running_linux_armv8.assets/image-20251011181245722.png)
+
+
+
+![image-20251011181308904](running_linux_armv8.assets/image-20251011181308904.png)
+
+### exclusive access
+
+- Exclusive access的流程
+  - 执行exclusive load
+  - 计算
+  - 执行exclusive store
+    - 如果有其它master对这个地址写操作，fail
+    - 如果没有其他master对这个地址写操作，success
+
+- 对于Non-shareable和System Shareable内存地址进行exclusive access，行为与AXI一样
+- 对于inner share和outer share内存
+  - Master exclusive monitor保证在exclusive load之后，没有其他master来写这个地址
+  - 总线互联的PoS exclusive monitor实现访问序列化
+
+
+
+![image-20251011183422722](running_linux_armv8.assets/image-20251011183422722.png)
+
+
+
+### DVM（Distributed Virtual Memory）
+
+- 发送广播到其他master:
+  - TLB invalidate
+  - Branch Predictor Invalidate
+  - Physical Instruction Cache Invalidate
+  - Virtual Instruction Cache Invalidate
+  - Synchronization
+
+![image-20251011184528562](running_linux_armv8.assets/image-20251011184528562.png)
+
+
+
+#### DVM传输事务-DVM message transactions
+
+![image-20251011184646314](running_linux_armv8.assets/image-20251011184646314.png)
+
+DVM message事务处理流程：
+
+1. Master通过read address channel发送DVM message请求
+2. 总线收到后，发送snoop到其他master上
+3. 其他master收到后，通过snoop response channel回应
+4. 总线收集所有的回应之后，给initiating master通过read data channel发送一个回应包
+
+
+
+#### DVM传输事务-DVM Synchronization and DVM Complete transactions
+
+![image-20251011185219958](running_linux_armv8.assets/image-20251011185219958.png)
+
+DVM sync 和 complete 事务处理流程：
+
+1. Initiating master 通过 read address channel 发出 DVM 同步请求
+2. 总线收到后，给其他 master 发送 snoop 广播
+3. 其他 master 收到后，通过 snoop response channel 发送回应。
+4. 总线收集完所有回应包之后，通过 read data channel 给 initiating master 发送回应包。
+5. 每个参与的 master 当完成了 TLB invalidation 之后，通过 read address channel 发送一个 DVM complete 事务。
+6. 总线收到 DVM complete 之后，立马给 master 回应。
+7. 当总线收集完所有参与 masters 的 DVM complete 事务之后，通过 snoop address channel 给 initaiting master 发送 DVM complete。
+8. Initiating master 通过 snoop reponse channel 回应总线。
+
+
+
+#### DVM message组包
+
+![image-20251011185550941](running_linux_armv8.assets/image-20251011185550941.png)
+
+对AxADDR不同的封装来实现不同的指令，例如TLBI
+
+#### 例子：修改PTE
+
+![image-20251011185722819](running_linux_armv8.assets/image-20251011185722819.png)
+
+### ACE-Lite
+
+- ACE-Lite应用在不需要参与系统缓存一致性的硬件设备，例如没有本地cache的硬件设备
+  - GPU
+  - SMMU
+
+![image-20251011190053027](running_linux_armv8.assets/image-20251011190053027.png)
+
+- ACE-Lite支持的事务
+  - Non-coherent事务：ReadNoSnoop，WriteNoSnoop
+  - 部分的coherent事务：ReadOnce，WriteUnique，WriteLineUnique
+  - Cache维护事务：CleanShared，CleanInvalid，MakeInvalid
+
+![image-20251011190247036](running_linux_armv8.assets/image-20251011190247036.png)
+
+#### ACE-Lite + DVM组合
+
+![image-20251011190301503](running_linux_armv8.assets/image-20251011190301503.png)
+
+#### ACE-Lite+DVM应用场景
+
+![image-20251011190331922](running_linux_armv8.assets/image-20251011190331922.png)
+
+#### 例子：ACE_Lite master执行partial write
+
+1. T0时刻：Master0上cache line的状态为UD，假设cache line的值为：aa bb cc dd
+2. T1时刻：master1往地址A执行partial cache line write操作，往里写入11 22
+
+![image-20251011190801603](running_linux_armv8.assets/image-20251011190801603.png)
+
+
+
+![image-20251011190904419](running_linux_armv8.assets/image-20251011190904419.png)
+
+![image-20251011190931510](running_linux_armv8.assets/image-20251011190931510.png)
+
+
+
+## CHI总线
+
+> 是 AMBA 5 中定义的第五代协议，是 ACE 的进化版，专为高性能、多核处理器系统设计，支持更复杂的缓存一致性管理和大规模系统集成，适用于需要高性能和复杂缓存一致性管理的大规模多核系统场景。
+
+文档：
+
+1. AMBA 5 CHI Architecture Specification，issue E.b
+2. Arm CoreLink CI-700 Coherent Interconnect Technical Reference Manual
+
+
+
+- CHI（Coherent Hub Interface）是下一代的硬件缓存一致性协议，目标适应不同数量的处理器和外设
+  - 小系统：嵌入式
+  - 中等系统：手机
+  - 大系统：data center
+- Cache一致性协议与ACE类似
+- 支持分层设计
+  - 协议层
+  - 传输层
+  - 链路层
+
+### 常见的总线连接结构
+
+![image-20251011192815712](running_linux_armv8.assets/image-20251011192815712.png)
+
+网格(mesh)结构：CI-700或者CMN-600
+
+![image-20251011192937170](running_linux_armv8.assets/image-20251011192937170.png)
+
+![image-20251011193124579](running_linux_armv8.assets/image-20251011193124579.png)
+
+![image-20251011193138295](running_linux_armv8.assets/image-20251011193138295.png)
+
+### CI-700控制器介绍
+
+- 最大支持 8 个 CPU cluster
+
+- 最大支持 12 个 crosspoint（XP）：路由或者 switch 的硬件组件
+
+  -  CI - 700 通过 XP 组成一个网格
+  - 每个 XP 可以有上下左右 4 个邻居 XP
+  -  每个网格可以支持 4 个 device port
+  -  每个 device port 可以用来连接缓存一致性的 master（RN - F）或者 slave 设备（SN - F）
+  
+- 最大支持 8 个 RN - F 接口，用于连接 CPU cluster，GPU，加速卡，或者其他带 cache 的 master 设备
+
+- 最大支持 8 个 HN - F 和最大 32MB 的 system cache
+
+- 最大支持 8 个 SN 接口
+
+
+![image-20251011193314318](running_linux_armv8.assets/image-20251011193314318.png)
+
+![image-20251011193323431](running_linux_armv8.assets/image-20251011193323431.png)
+
+### ACE和CHI的区别
+
+- 相同之处：
+  - 目标：硬件缓存一致性解决方案
+  - 采用类似cache状态转换
+  - snoop传输事务的理解很类似
+- 不同之处
+  - ACE 采用 crossbar 结构，CHI 采用网格 mesh 结构
+  - CHI 采用分层设计：协议层，传输层，链路层
+  - CHI 采用 Packet-based communication
+  - CHI 采用 request node，home node，slave node 概念来描述传输事务
+  - CHI 支持更多的 snoop 传输事务
+  - CHI 支持 DCT，DMT，DWT 等优化传输性能
+  - CHI 支持 atomic 操作支持 cache stash
+
+### 节点
+
+**RN（request node）：请求节点**
+
+- **RN - F：缓存一致性的请求节点**
+  - 内置硬件缓存一致性的 cache
+  - 允许产生所有的传输事务
+  - 支持所有的 snoop 传输
+- **RN - D：内置 DVM 的 IO 缓存一致性请求节点（类似 ACE - Lite + DVM）**
+  - 不包括硬件缓存一致性 cache
+  - 接收 DVM 传输事务
+  - 可以产生一部分的传输事务
+- **RN - I：IO 请求节点**
+  - 不包含硬件缓存一致性 cache
+  - 不接收 DVM 传输事务
+  - 可以产生一部分传输事务
+  - 不支持 snoop
+
+**HN（home node）：在系统总线的主节点，用于接收来自请求节点的传输事务**
+
+- **HN - F：缓存一致性的主节点**
+  - 接收所有的请求类型
+  - PoC 的方式管理来自 RN - F 的 snoop 请求
+  - PoS 的方式管理内存请求的次序
+  - 包括 directory or snoop filter 来减少冗余的 snoop
+- **HN - I：不支持缓存一致性的主节点**
+  - 只能处理一部分请求
+  - 不包括 POC，不能处理 snoopable 请求，
+  - POS 来处理 IO 请求的次序
+
+**SN：从节点**
+
+- **SN - F：**使用 normal memory 的从设备，它可以处理 non - snoopable 读写，atomic 请求（exclusive 请求），以及 CMO 请求
+- **SN - I**：类似 SN - F，用于外设或者 normal memory
+
+
+
+**例子**
+
+
+
+![image-20251011194228949](running_linux_armv8.assets/image-20251011194228949.png)
+
+### cache状态机
+
+与ACE相比，新增了UCE和UDP
+
+![image-20251011194423301](running_linux_armv8.assets/image-20251011194423301.png)
+
+### 通道Channel
+
+- CHI定义的channel与ACE完全不一样
+
+![image-20251011194559444](running_linux_armv8.assets/image-20251011194559444.png)
+
+- Channel中的握手协议与AXI/ACE不同
+  - FLITV信号拉高，表明transmitter准备发送数据包，包已经valid
+  - LCDRV信号拉高表明receiver发送一个credit给transmitter：你可以发送了
+
+### 链路层
+
+- 链路层为节点和互连IP之间基于packet-base的通信提供了一种流线型的机制（streamlined mechanism）
+- 提供了一种two-way link传输模式
+  - Transmitter -> Receiver
+  - Receiver -> Transmitter
+
+
+
+![image-20251011195003083](running_linux_armv8.assets/image-20251011195003083.png)
+
+![image-20251011195013169](running_linux_armv8.assets/image-20251011195013169.png)
+
+
+
+### 包格式-Flits
+
+- Flit = Flow control unIT，是在链路层传输的最小单元。一个packet包含多个Flits
+  - **Protocol Flit**：用来传输协议信息的
+  - **Link Flit**：用来传输链路维护（link maintenance）信息
+- CHI采用消息包（protocol messages）形式来传递信息，包括各种ID，opcodes，内存属性，地址，数据，error response等
+![image-20251011195406008](running_linux_armv8.assets/image-20251011195406008.png)
+
+#### Protocol flit
+
+- CHI定义了4中protocol flit
+  - Request flit
+  - Response flit
+  - Snoop flit
+  - Data flit
+- 每种flit都有自己的格式（format）
+
+![image-20251011195532860](running_linux_armv8.assets/image-20251011195532860.png)
+
+
+
+### ID
+
+CHI 协议里定义了很多的 ID：
+
+- Source ID（SrcID）：表明 flit 包的发送节点的 ID
+- Target ID（TgtID）：表明接收 flit 包的目标节点 ID
+- Transaction ID（TxnID）：每个传输事务有一个唯一的 ID，可以用于 outstanding request，最大支持 256 个未完成的传输 ID。类似 AXI 中的 transaction ID。
+- Request opcode (Opcode)：用来指定传输类型
+- Data Buffer ID (DBID)：用于回应和数据包，允许事务的 Completer 为事务提供自己的标识符
+
+#### ID号分配和绑定
+
+- CHI 使用 System Address Map (SAM) 来把传输事务中的物理地址转换成 target Node ID
+- 每个 RN 和 HN 都有个 SAM
+- CHI 规范没有约定 SAM 如何实现，包括 SAM 的格式（format and struct）
+- CHI 对 SAM 提出的要求：
+  - 描述全系统的地址空间，所有的 SAM 必须全局一致性，例如地址 0xFF00_0000 必须映射到相同的 HN
+  -  对于没有映射的地址，必须提供错误的回应机制
+
+![image-20251011195957760](running_linux_armv8.assets/image-20251011195957760.png)
+
+### Completion acknowledgement
+
+- 类似 ACE 中的 RACK 和 WACK 信号，用来保证 transaction 的次序
+- CompACK 保证：HN - F 在收到完成 CompACK 之后，才能处理其他 snooping 传输事务
+- 对于读事务：
+  - 除了 ReadNoSnp 和 ReadOnce * 事务，其他读事情都需要 CompACK
+  - RN - F 在收到 Comp, CompData, RespSepData 等信号之后才会发送 CompACK
+  - HN - F 必须等待 CompACK 之后，才能对同一个地址发送其他请求事务的 snooping
+- 对于写事务：
+  - 只有 WriteUnique 和 WriteNoSnp 事务需要 CompACK
+
+![image-20251011201519239](running_linux_armv8.assets/image-20251011201519239.png)
+
+
+
+
+
+
+
+### exclusive access
+
+- Exclusive流程与ACE类似
+- Exclusive access的流程：
+  - 执行exclusive load
+  - 计算
+  - 执行exclusive store
+    - 如果有其他master对这个地址写操作，fail
+    - 如果没有其他master对这个地址写操作，success
+- 在RN-F（master）端必须实现一个LP（Logical Processor）monitor
+- 在CHI互联总线内部的HN-F节点上必须实现一个PoC（Point of Coherence）monitor
+
+
+
+![image-20251011202142911](running_linux_armv8.assets/image-20251011202142911.png)
+
+**LP monitor 位于 RN - F：**
+
+1. 每个 RN - F 必须实现一个 exclusive monitor，用来观察和监视 exclusive 访问的那个内存地址。
+2. 当 CPU 开始一个 exclusive load 的时候，LP monitor 会被设置。
+3. 当下面情况，LP monitor 会被 reset：
+   - 如果这个地址被其他 LP 改写了
+   - 如果 LP 对这个地址执行了另外一个 store 操作
+
+**POC monitor 位于 HN - F：**
+
+1. POC monitor 会记录每一个 LP 执行 exclusive 访问的 snoop 事务。
+2. monitor 会并行地监视所有 LP 的 exclusive 访问。
+3. 当 HN - F 收到一个 exclusive load 或者 store 操作，monitor 就会把这个信息注册：某某正在尝试一个 exclusive 访问。
+4. 当 LP 执行 exclusive store 失败之后，LP 需要重启 exclusive load 和 store 的访问序列。
+5. 当 HN - F 收到一个 exclusive store 操作：
+   - 如果在 PoC monitor 里已经注册了这个地址对应的 exclusive 访问记录，并且它还没有被其他 LP 给 reset 掉，那么 exclusive store 会成功，然后其他所有尝试 exclusive 的访问记录会被 reset。
+   - 如果 LP 执行一个 exclusive 访问，但是在 POC monitor 里没有找到，那么 exclusive store 会失败。
+
+### Atomic access
+
+- Atomic访问在CHI.B协议中添加
+- Atomic访问允许在靠近数据的地方执行运算和计算
+  - HN-F或者SN里面有ALU逻辑计算单元
+- Atomic访问的好处：
+  - 更准确和可预测的延时
+  - 不用和其他requester争用cache，减少了访问内存出现的阻塞和cache颠簸
+  - 公平性。多个requester同时访问一个内存地址的时候，通过POS或者POC来做仲裁
+- Atomic事务有四种
+  - AtomicStore
+  - AtomicLoad
+  - AtomicSwap
+  - AtomicCompare
+
+![image-20251011203140267](running_linux_armv8.assets/image-20251011203140267.png)
+
+### Atomic access和exclusive access对比
+
+![image-20251011203222082](running_linux_armv8.assets/image-20251011203222082.png)
+
+### Atomic类型
+
+![image-20251011203459205](running_linux_armv8.assets/image-20251011203459205.png)
+
+![image-20251011203557351](running_linux_armv8.assets/image-20251011203557351.png)
+
+### 新特性
+
+#### cache stach
+
+- IO设备直接把数据写入到目标RN-F的cache里
+- 类似Intel DDIO技术
+- Cache stash支持的事务有4种
+  - WriteUniquePtlStash
+  - WriteUniqueFullStash
+  - WriteUniqueFullStash
+  - StashOnceShared
+
+![image-20251011204128590](running_linux_armv8.assets/image-20251011204128590.png)
+
+#### DMT和DCT
+
+- 在CHI.A协议上，读数据和snoop data要先发送给主节点，然后才能发送receiver节点
+  - 缺点：增加了传输长度，延时
+
+![image-20251011204424490](running_linux_armv8.assets/image-20251011204424490.png)
+
+![image-20251011204433551](running_linux_armv8.assets/image-20251011204433551.png)
+
+![image-20251011204857043](running_linux_armv8.assets/image-20251011204857043.png)
+
+![image-20251011204929713](running_linux_armv8.assets/image-20251011204929713.png)
