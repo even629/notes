@@ -2175,7 +2175,7 @@ ARMv8.6手册
   - **从ELR_ELx（Exception Link Register）寄存器中恢复PC指针**
   - **从SPSR_ELx（The Saved Program Status Register）寄存器恢复处理器的状态**
 
-![image-20250809145156163](running_linux_armv8.assets/image-20250809145156163.png)
+![image-20250809145156163](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510161436060.png)
 
 ### 异常返回地址
 

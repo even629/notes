@@ -53,8 +53,6 @@ master派到node节点的代表，管理本机容器
 
 提供网络代理，实现负载均衡等操作
 
-## 
-
 ### 1.4 k8s核心概念
 
 1. Pod
@@ -94,13 +92,13 @@ master派到node节点的代表，管理本机容器
 
 - 单master集群
 
-![img](./k8s.assets/1690116032765-7e864076-ecab-4f3a-a863-4a31318be558.png)
+![单master集群](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141437106.png)
 
 缺点:master挂掉就寄了
 
 - 多master集群
 
-![img](./k8s.assets/1690116111043-7fa6e742-7d8d-42ec-b6a4-6d3a59250d7a.png)
+![多master集群](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141437499.png)
 
 高可用的集群
 
@@ -179,7 +177,7 @@ $ kubectl get pod,svc
 
 #### 1.5.2 二进制包搭建
 
-![img](./k8s.assets/1690270222280-22955cfc-68fa-47e9-b935-2b34ba6d3b16.png)
+![二进制包搭建](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141438880.png)
 
 
 
@@ -230,7 +228,7 @@ $ kubectl --help
 
 #### 1.7.2 yaml文件示例
 
-![image-20230807211133244](./k8s.assets/image-20230807211133244.png)
+![yaml文件示例](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141438799.png)
 
 | 字段       | 说明       |
 | ---------- | ---------- |
@@ -294,11 +292,11 @@ Pod持久化数据：日志数据，业务数据
 
 
 
-![image-20230807213750692](./k8s.assets/image-20230807213750692.png)
+![volumes](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141438637.png)
 
 #### 2.1.4 Pod镜像拉取策略
 
-![image-20230807214310677](./k8s.assets/image-20230807214310677.png)
+![imagePullPolicy](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141438267.png)
 
 **imagePullPolicy**
 
@@ -312,17 +310,17 @@ Never: Pod永远不会主动拉取这个镜像,需要手动拉取
 
 #### 2.1.5 Pod资源限制
 
-![image-20230807214650036](./k8s.assets/image-20230807214650036.png)
+![Pod资源限制](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141439263.png)
 
 
 
-![image-20230807214752888](./k8s.assets/image-20230807214752888.png)
+![resources](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141439921.png)
 
 1c = 1000m(1核cpu)
 
 #### 2.1.7 Pod重启机制
 
-![image-20230807214939269](./k8s.assets/image-20230807214939269.png)
+![restartPolicy](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141439857.png)
 
 **restartPolicy**
 
@@ -342,7 +340,7 @@ Never: 当容器终止推出时，从不重启容器
 
 应用层面健康检查：
 
-![image-20230807215420620](./k8s.assets/image-20230807215420620.png)
+![应用层面健康检查](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141439085.png)
 
 echo $?表示linux上一条命令是否执行成功
 
@@ -350,7 +348,7 @@ echo $?表示linux上一条命令是否执行成功
 
 #### 2.1.9 创建Pod流程
 
-![image-20230807230142401](./k8s.assets/image-20230807230142401.png)
+![创建Pod流程](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141440960.png)
 
 - master节点
 
@@ -370,9 +368,9 @@ kubelet --apiserver --读取etcd拿到分配给当前节点pod --docker创建容
 
 2. 节点选择器标签影响Pod调度
 
-![image-20230807230744324](./k8s.assets/image-20230807230744324.png)
+![nodeSelector](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141440236.png)
 
-![image-20230807230836133](./k8s.assets/image-20230807230836133.png)
+![nodeSelector](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141440048.png)
 
 需要先对节点打标签
 
@@ -383,7 +381,7 @@ $ kubectl get nodes k8snode1 --show-labels
 
 3. 节点亲和性影响Pod调度
 
-![image-20230807231246458](./k8s.assets/image-20230807231246458.png)
+![节点亲和性](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141441999.png)
 
 **节点亲和性** nodeAffinity和之前nodeSelector基本一样的,根据节点上标签约束来决定Pod调度到哪些节点上
 
@@ -473,7 +471,7 @@ $ kubectl describe node k8snode1 | grep Taint
 
 污点容忍:
 
-![image-20230807234403228](./k8s.assets/image-20230807234403228.png)
+![tolerations](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141441913.png)
 
 
 
@@ -489,9 +487,9 @@ $ kubectl describe node k8snode1 | grep Taint
 
   - Pod 和Controller之间通过label标签建立关系
 
-  ![image-20230808234119571](./k8s.assets/image-20230808234119571.png)
+  ![Pod和Controller通过标签建立关系](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141441405.png)
 
-![image-20230808232857068](./k8s.assets/image-20230808232857068.png)
+![Pod和Controller的关系](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141442159.png)
 
 #### 2.1.3 deployment应用场景
 
@@ -550,9 +548,9 @@ $ kubectl scale deployment web --replicas=10
 
 **StatefulSet**部署有状态应用
 
-![image-20230811230353736](./k8s.assets/image-20230811230353736.png)
+![StatefulSet部署有状态应用](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141443096.png)
 
-![image-20230811230406752](./k8s.assets/image-20230811230406752.png)
+![StatefulSet部署有状态应用](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141443707.png)
 
 执行后查看pod，有3个Pod，每个都是唯一的名称
 
@@ -574,7 +572,7 @@ example: nginx-statefulset-0.nignx.default.svc
 - 在每个node上运行一个pod，新加入的node也同样运行在一个Pod里面
 - 例子：在每个node节点安装数据采集工具
 
-![image-20230811231134348](./k8s.assets/image-20230811231134348.png)
+![部署守护进程DaemonSet](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141443841.png)
 
 ```bash
 $ kubectl delete statefulset --all
@@ -586,7 +584,7 @@ $ kubectl exec -it ds-test-cbk6cv bash
 
 #### 2.1.9 job(一次性任务)和cronjob(定时任务)
 
-![image-20230811231545974](./k8s.assets/image-20230811231545974.png)
+![job](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141444374.png)
 
 
 
@@ -606,7 +604,7 @@ $ kubectl delete -f job.yaml
 
 定时任务:
 
-![image-20230811232040797](./k8s.assets/image-20230811232040797.png)
+![CronJob](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141444234.png)
 
 ```bash
 $ kubectl apply -f cronjob.yaml
@@ -614,10 +612,6 @@ $ kubectl get pods
 $ kubectl get cronjobs
 $ kubectl logs hello-1599100140-wkn79
 ```
-
-每次执行状态bian'wei
-
-
 
 
 
@@ -631,17 +625,17 @@ $ kubectl logs hello-1599100140-wkn79
 
 - 防止Pod失联(服务发现)
 
-  ![image-20230811222421895](./k8s.assets/image-20230811222421895.png)
+  ![服务发现](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141445936.png)
 
 - 定义一组Pod访问策略(负载均衡)
 
-![image-20230811222533358](./k8s.assets/image-20230811222533358.png)
+![负载均衡](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141445167.png)
 
 #### 2.3.4 Pod和Service的关系
 
 根据label标签建立关系
 
-![image-20230811224608990](./k8s.assets/image-20230811224608990.png)
+![Pod和Service通过标签建立关系](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141445708.png)
 
 #### 2.3.5 常用Service类型
 
@@ -684,7 +678,7 @@ $ echo -n "admin" | base64
 
 1.创建secret加密数据
 
-![image-20230812225624146](./k8s.assets/image-20230812225624146.png)
+![创建secret加密数据](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141446261.png)
 
 ```bash
 $ kubectl create -f secret.yaml
@@ -693,9 +687,9 @@ $ kubectl get secret
 
 2. 以变量的形式挂载到pod容器中
 
-valueForm
+valueFrom
 
-![image-20230812225801050](./k8s.assets/image-20230812225801050.png)
+![valueFrom](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141446007.png)
 
 ```bash
 $ kubectl apply -f secret-val.yaml
@@ -704,11 +698,11 @@ $ kubectl exec -it mypod bash
 $ echo $SECRET_USERNAME
 ```
 
-3. 以Volume挂在到数据卷中
+3. 以Volume挂载数据卷中
 
-![image-20230812230044644](./k8s.assets/image-20230812230044644.png)
+![以Volume挂载到数据卷中](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141446735.png)
 
-![image-20230812230409400](./k8s.assets/image-20230812230409400.png)
+![以Volume挂载到数据卷中](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141447594.png)
 
 ```bash
 $ kubectl delete -f secret-val.yaml
@@ -746,7 +740,7 @@ $ kubectl describe cm redis-config
 
 3.以Volume挂在到Pod容器中
 
-![image-20230812231002642](./k8s.assets/image-20230812231002642.png)
+![以Volume挂在到Pod容器中](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141447224.png)
 
 ```bash
 $ kubectl apply -f cm.yaml
@@ -758,7 +752,7 @@ $ kubectl logs mypod
 
 （1）创建yaml,声明变量信息configmap创建
 
-![image-20230812231245649](./k8s.assets/image-20230812231245649.png)
+![声明变量](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141448378.png)
 
 （2）以变量挂载
 
@@ -767,7 +761,7 @@ $ kubectl apply -f myconfig.yaml
 $ kubectl get cm
 ```
 
-![image-20230812231343142](./k8s.assets/image-20230812231343142.png)
+![以变量挂载](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141448692.png)
 
 ```bash
 $ kubectl apply -f config-var.yaml
@@ -858,7 +852,7 @@ $ kubectl create ns roledemo
 $ kubectl run nginx --image=nginx -n roledemo
 ```
 
-![image-20230813210253298](./k8s.assets/image-20230813210253298.png)
+![RBAC实现鉴权](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141449633.png)
 
 ```bash
 # 3.创建角色
@@ -868,7 +862,7 @@ $ kubectl apply -f rbac-role.yaml
 $ kubectl get role -n roledemo
 ```
 
-![image-20230813210536202](./k8s.assets/image-20230813210536202.png)
+![RBAC实现鉴权](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141449836.png)
 
 ```bash
 # 4.创建角色绑定
@@ -879,7 +873,7 @@ $ kubectl get role,rolebinding -n roledemo
 
 5. 使用证书
 
-![image-20230813210914825](./k8s.assets/image-20230813210914825.png)
+![使用证书](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141449002.png)
 
 ```bash
 $ vim rbac-user.sh
@@ -906,7 +900,7 @@ $ kubectl get pods -n roledemo
 - pod和ingress通过service关联的
 - ingress作为统一入口,由service关联一组pod
 
-![image-20230813212945120](./k8s.assets/image-20230813212945120.png)
+![Ingress](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141450003.png)
 
 
 
@@ -926,7 +920,7 @@ $ kubectl get svc
 
 2. 部署ingress controller
 
-![image-20230813214612773](./k8s.assets/image-20230813214612773.png)
+![部署ingress controller](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141450672.png)
 
 ```bash
 $ kubectl apply -f ingress-con.yaml
@@ -935,7 +929,7 @@ $ kubectl get pods -n ingress-nginx
 # 创建ingress规则
 ```
 
-![image-20230813220344866](./k8s.assets/image-20230813220344866.png)
+![创建ingress规则](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141450934.png)
 
 ```bash
 $ vim ingress-h.yaml
@@ -989,7 +983,7 @@ Helm是一个k8s的包管理工具,就像Linux下的包管理器如yum/apt等，
 
 
 
-![image-20230813222304179](./k8s.assets/image-20230813222304179.png)
+![Helm v3架构](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141451107.png)
 
 https://helm.sh/docs/intro/quickstart/
 
@@ -1185,7 +1179,7 @@ $ cd pv
 $ vim nfs-nginx.yaml
 ```
 
-![image-20230813234508913](./k8s.assets/image-20230813234508913.png)
+![使用nfs持久网络存储](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141451280.png)
 
 ```bash
 $ kubectl describe pod nginx-dep1-79x79jg79-9sn8gx
@@ -1197,15 +1191,15 @@ $ kubectl describe pod nginx-dep1-79x79jg79-9sn8gx
 2. PVC: 用户调用不需要关心内部实现细节(消费者)
 3. 实现流程：
 
-![image-20230814000402777](./k8s.assets/image-20230814000402777.png)
+![PV和PVC](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141451943.png)
 
 ```bash
 $ vim pvc.yaml
 ```
 
-![image-20230814000716288](./k8s.assets/image-20230814000716288.png)
+![pvc.yaml](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141452459.png)
 
-![image-20230814000734065](./k8s.assets/image-20230814000734065.png)
+![pvc.yaml](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141452112.png)
 
 ```bash
 $ kubectl apply -f pvc.yaml
@@ -1215,7 +1209,7 @@ $ kubectl apply -f pvc.yaml
 $ vim pv.yaml
 ```
 
-![image-20230814000835192](./k8s.assets/image-20230814000835192.png)
+![pv.yaml](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141452154.png)
 
 ```bash
 $ kubectl apply -f pv.yaml
@@ -1263,15 +1257,15 @@ https://developer.aliyun.com/article/836300
 
 ## 3.搭建高可用集群
 
-![image-20230814110254843](./k8s.assets/image-20230814110254843.png)
+![高可用集群](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141453676.png)
 
 #### 3.1 高可用集群技术
 
-![image-20230814110600606](./k8s.assets/image-20230814110600606.png)
+![高可用集群技术](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141453922.png)
 
 #### 3.2 部署
 
-![image-20230814110906214](./k8s.assets/image-20230814110906214.png)
+![部署](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141453467.png)
 
 https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/kubeadm/high-availability/
 
@@ -1279,6 +1273,6 @@ https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/kubeadm/high
 
 #### 4.1容器交付流程
 
-![image-20230814111817065](./k8s.assets/image-20230814111817065.png)
+![容器交付流程](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141453133.png)
 
-![image-20230814112154349](./k8s.assets/image-20230814112154349.png)
+![容器交付流程](https://cdn.jsdelivr.net/gh/even629/myPicGo/202510141503175.png)

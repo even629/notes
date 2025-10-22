@@ -1,5 +1,3 @@
-# https://go.dev/tour/
-
 ## Basics
 
 ### 1.Package
