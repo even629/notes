@@ -15635,3 +15635,143 @@ github上已有编写好的设备树插件驱动(https://github.com/ikwzm/dtbocf
 
 # 设备模型
 
+
+
+字符设备驱动通常适用于相对简单的设备，对于一些更复杂的功能，比如说**电源管理**和**热插拔事件管理**，使用字符设备框架可能不够灵活和高效。
+
+为了应对更复杂的设备和功能，Linux内核提供了设备模型。设备模型允许开发人员以更高级的方式来描述硬件设备和它们之间的关系，并提供一组通用 API 和机制来处理设备的注册，热插拔事件，电源管理等。
+
+通过使用设备模型，驱动开发人员可以将更多的底层功能交给内核来处理，而不必重复实现这些基础功能。这使得驱动的编写更加高级和模块化，减少了重复工作和出错的可能性。
+
+**对于一些常见的硬件设备，如 USB、I2C 和平台设备，内核已经提供了相应的设备模型和相关驱动，开发人员可以基于这些模型来编写驱动，从而更快地实现特定设备的功能，并且可以借助内核的电源管理和热插拔事件管理功能**。
+
+## 使用设备模型的优点
+
+设备模型在内核驱动中扮演着重要的角色，它提供了一种统一的方式来描述硬件设备和它们之间的关系。以下是设备模型在内核驱动中的几个重要方面。
+
+- **代码复用**：
+
+**设备模型允许多个设备复用同一个驱动**。通过在设备树或总线上定义不同的设备节点，这些设备可以使用相同的驱动进行初始化和管理。这样可以减少代码的冗余，提高驱动的复用性和维护性。
+
+- **资源的动态申请和释放**
+
+设备模型提供了一种机制来动态申请和释放设备所需的资源，如内存，中断等。驱动可以使用这些机制来管理设备所需的资源，确保在设备初始化和关闭时进行正确的资源分配和释放。
+
+- **简化驱动编写**
+
+设备模型提供了一组通用 API 和机制，使得驱动编写更加简化和模块化。开发人员可以使用这些 API 来注册设备，处理设备事件，进行设备的读写操作等，而无需重复实现这些通用功能。
+
+- **热插拔机制**
+
+**设备模型支持热插拔机制**，能够在运行时动态添加或移除设备。当设备插入或拔出时，内核会生成相应的热插拔事件，驱动可以通过监听这些事件来执行相应的操作，如设备的初始化或释放。
+
+- **驱动的面向对象思想**
+
+设备模型的设计借鉴了面向对象编程（OOP）的思想。**每个设备都被看作是一个对象，具有自己的属性和方法，并且可以通过设备模型的机制进行继承和扩展**。这种设计使得驱动的编写更加模块化和可扩展，可以更好地应对不同类型的设备和功能需求。
+
+
+
+## kobject和kset
+
+**kobject** 和 **kset** 是 Linux 内核中用于管理内核对象的基本概念。
+
+
+
+kobject(内核对象)是内核中抽象出来的通用对象模型，**用于表示内核中的各种实体**。kobject是一个结构体，其中包含了一些描述该对象的属性和方法。它提供了一种统一的接口和机制，用于管理和操作内核对象。
+
+**include/linux/kobject.h**
+
+```c
+struct kobject {
+	const char		*name;
+	struct list_head	entry;
+	struct kobject		*parent;
+	struct kset		*kset;
+	struct kobj_type	*ktype;
+	struct kernfs_node	*sd; /* sysfs directory entry */
+	struct kref		kref;
+#ifdef CONFIG_DEBUG_KOBJECT_RELEASE
+	struct delayed_work	release;
+#endif
+	unsigned int state_initialized:1;
+	unsigned int state_in_sysfs:1;
+	unsigned int state_add_uevent_sent:1;
+	unsigned int state_remove_uevent_sent:1;
+	unsigned int uevent_suppress:1;
+};
+```
+
+
+
+- `const char *name`：表示 kobject 的名称，**通常用于在/sys 目录下创建对应的目录**
+- `struct list_head entry`：用于将 kobject 链接到父 kobject 的子对象列表中，以建立层次关系。
+- `struct kobject *parent`：指向父 kobject，表示 kobject 的层次关系。
+- `struct kset *kset`：指向包含该 kobject 的 kset，用于进一步组织和管理 kobject。
+- `struct kobj_type *ktype`：指向定义 kobject 类型的 kobj_type 结构体，**描述 kobject 的属性和操作**。
+- `struct kernfs_node *sd`：指向 sysfs 目录中对应的 kernfs_node，用于访问和操作 sysfs 目录项。
+- `struct kref kref`：**用于对 kobject 进行引用计数，确保在不再使用时能够正确释放资源**。
+- `unsigned int` 字段：表示一些状态标志和配置选项，例如是否已初始化、是否在 sysfs 中、是否发送了 add/remove uevent 等。
+
+
+
+**每一个 kobject 都会对应系统`/sys/`下的一个目录**
+
+![sys目录](linux_driver.assets/image-20251203213246491.png)
+
+
+
+kobject 表示系统/sys 下的一个目录，而目录又是有多个层次，所以对应 kobject 的树状关系如下图所示
+
+![kobject树状关系图](linux_driver.assets/image-20251203213324354.png)
+
+
+
+# 
+
+
+
+
+
+**kset(内核对象集合)是一种用于组织和管理一组相关 kobject 的容器**。
+
+kset 是 kobject 的一种扩展，它提供了一种层次化的组织结构，可以将一组相关的 kobject 组织在一起。kset 在内核里面用 `struct kset` 结构体来表示
+
+ **include/linux/kobject.h**
+
+```c
+/**
+ * struct kset - a set of kobjects of a specific type, belonging to a specific subsystem.
+ *
+ * A kset defines a group of kobjects.  They can be individually
+ * different "types" but overall these kobjects all want to be grouped
+ * together and operated on in the same manner.  ksets are used to
+ * define the attribute callbacks and other common events that happen to
+ * a kobject.
+ *
+ * @list: the list of all kobjects for this kset
+ * @list_lock: a lock for iterating over the kobjects
+ * @kobj: the embedded kobject for this kset (recursion, isn't it fun...)
+ * @uevent_ops: the set of uevent operations for this kset.  These are
+ * called whenever a kobject has something happen to it so that the kset
+ * can add new environment variables, or filter out the uevents if so
+ * desired.
+ */
+struct kset {
+	struct list_head list;
+	spinlock_t list_lock;
+	struct kobject kobj;
+	const struct kset_uevent_ops *uevent_ops;
+} __randomize_layout;
+```
+
+- `struct list_head list`：用于将 kset 链接到**全局 kset 链表**中，以便对 kset 进行遍历和管理。
+- `spinlock_t list_lock`：用于保护对 kset 链表的并发访问，确保线程安全性。
+- `struct kobject kobj`：作为 **kset 的 kobject 表示**，用于在`/sys` 目录下创建对应的目录，并与kset 关联。
+- `const struct kset_uevent_ops *uevent_ops`：**指向 kset 的 uevent 操作的结构体，用于处理与 kset 相关的 uevent 事件**（热插拔相关）。
+
+
+
+kobject和kset的关系如下：
+
+![image-20251203213813138](linux_driver.assets/image-20251203213813138.png)
+
